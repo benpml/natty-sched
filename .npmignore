@@ -1,0 +1,25 @@
+# Test files
+test.js
+test-comprehensive.js
+test-calculator.js
+
+# Demo files
+demo.js
+comparison.js
+example-calculator.js
+example-full-workflow.js
+
+# Development files
+.git/
+.gitignore
+node_modules/
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.iml

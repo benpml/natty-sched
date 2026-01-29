@@ -1,0 +1,47 @@
+{
+  "name": "natty-sched",
+  "version": "1.0.1",
+  "description": "Natural language scheduler - Convert human-readable schedules to JSON format with next execution time calculation. Supports complex patterns like 'every 3 days', 'weekdays at 9am', 'monthly on the 15th', with typo tolerance.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js && node test-comprehensive.js && node test-calculator.js"
+  },
+  "keywords": [
+    "scheduler",
+    "cron",
+    "natural-language",
+    "parser",
+    "schedule",
+    "nlp",
+    "time",
+    "recurring",
+    "interval",
+    "human-readable",
+    "date-parser",
+    "calendar",
+    "scheduling",
+    "task-scheduler",
+    "cron-alternative",
+    "flexible-scheduling",
+    "typo-tolerant"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bugs": {
+    "url": ""
+  },
+  "homepage": "",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "files": [
+    "index.js",
+    "src/",
+    "README.md",
+    "LICENSE"
+  ]
+}
