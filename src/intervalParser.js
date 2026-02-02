@@ -271,6 +271,52 @@ function parseMonthDays(text) {
 }
 
 /**
+ * Parse weekday position in month (e.g., "first monday", "last friday", "third tuesday")
+ */
+function parseWeekdayPosition(text) {
+    const ordinals = {
+        'first': 1,
+        '1st': 1,
+        'second': 2,
+        '2nd': 2,
+        'third': 3,
+        '3rd': 3,
+        'fourth': 4,
+        '4th': 4,
+        'fifth': 5,
+        '5th': 5,
+        'last': -1
+    };
+
+    const weekdayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const weekdayShort = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+    // Pattern: "first/second/third/fourth/fifth/last [weekday] of the month" or "of every month"
+    const patterns = [
+        /\b(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s+of\s+(?:the\s+)?month\b/i,
+        /\b(first|second|third|fourth|fifth|last|1st|2nd|3rd|4th|5th)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s+of\s+every\s+month\b/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            const position = ordinals[match[1].toLowerCase()];
+            const weekdayName = match[2].toLowerCase();
+            const weekdayIndex = weekdayNames.indexOf(weekdayName);
+
+            if (position && weekdayIndex !== -1) {
+                return {
+                    weekday: weekdayShort[weekdayIndex],
+                    position: position
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
  * Parse year date from text (month and day for yearly recurrence)
  */
 function parseYearDate(text) {
@@ -345,5 +391,6 @@ module.exports = {
     parseInterval,
     parseWeekdays,
     parseMonthDays,
-    parseYearDate
+    parseYearDate,
+    parseWeekdayPosition
 };

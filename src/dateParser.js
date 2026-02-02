@@ -44,13 +44,27 @@ function parseDateTime(match) {
     // Parse time if present
     if (match[5]) {
         hours = parseInt(match[5]);
-        minutes = match[6] ? parseInt(match[6]) : 0;
 
-        const period = match[7] ? match[7].toLowerCase() : null;
-        if (period === 'pm' && hours !== 12) {
-            hours += 12;
-        } else if (period === 'am' && hours === 12) {
-            hours = 0;
+        // Check if match[6] is a number (minutes) or am/pm string
+        if (match[6] && !isNaN(parseInt(match[6]))) {
+            // It's minutes
+            minutes = parseInt(match[6]);
+            // Period might be in match[7]
+            const period = match[7] ? match[7].toLowerCase() : null;
+            if (period === 'pm' && hours !== 12) {
+                hours += 12;
+            } else if (period === 'am' && hours === 12) {
+                hours = 0;
+            }
+        } else if (match[6] && (match[6].toLowerCase() === 'am' || match[6].toLowerCase() === 'pm')) {
+            // match[6] is am/pm, no minutes
+            minutes = 0;
+            const period = match[6].toLowerCase();
+            if (period === 'pm' && hours !== 12) {
+                hours += 12;
+            } else if (period === 'am' && hours === 12) {
+                hours = 0;
+            }
         }
     }
 

@@ -54,10 +54,12 @@ function normalizeInput(input) {
         .replace(/\bminus\b/g, 'except')
         .replace(/\bbut not\b/g, 'except')
 
-        // Normalize contractions
+        // Normalize contractions and variations
         .replace(/\bmon\b/g, 'monday')
-        .replace(/\btue\b/g, 'tuesday')
-        .replace(/\bwed\b/g, 'wednesday')
+        .replace(/\btues?\b/g, 'tuesday')
+        .replace(/\bweds?\b/g, 'wednesday')
+        .replace(/\bthurs?\b/g, 'thursday')
+        .replace(/\bthur\b/g, 'thursday')
         .replace(/\bthu\b/g, 'thursday')
         .replace(/\bfri\b/g, 'friday')
         .replace(/\bsat\b/g, 'saturday')

@@ -196,8 +196,8 @@ function validateSchedule(schedule) {
             throw new Error('Weekly schedules must specify weekdays');
         }
 
-        if (interval.unit === 'month' && !on.month_days) {
-            throw new Error('Monthly schedules must specify month_days');
+        if (interval.unit === 'month' && !on.month_days && !on.weekday_position) {
+            throw new Error('Monthly schedules must specify month_days or weekday_position');
         }
 
         if (interval.unit === 'year' && !on.year_date) {

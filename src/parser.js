@@ -1,6 +1,6 @@
 const { normalizeInput, tokenize } = require('./tokenizer');
 const { parseDateTime, parseRelativeDate } = require('./dateParser');
-const { parseInterval, parseWeekdays, parseMonthDays, parseYearDate } = require('./intervalParser');
+const { parseInterval, parseWeekdays, parseMonthDays, parseYearDate, parseWeekdayPosition } = require('./intervalParser');
 const { buildScheduleJSON } = require('./builder');
 
 /**
@@ -121,6 +121,9 @@ function parseRepeat(context) {
         /\b(tomorrow|today|yesterday)\b/,
         /\bnext\s+(week|month|quarter|year)\b/,
         /\b(beginning|start|end|last day)\s+of\s+(next|this|the)\s+(month|quarter|year)\b/,
+        // Full dates with explicit year (e.g., "December 14th 2026", "Dec 14 2026", "2026-12-14")
+        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(st|nd|rd|th)?\s+\d{4}\b/i,
+        /\b\d{4}-\d{2}-\d{2}\b/,
     ];
 
     for (const pattern of oneTimeFuturePatterns) {
@@ -184,13 +187,17 @@ function findDateTimePattern(tokens) {
     const text = tokens.join(' ');
 
     // Pattern: Month Day, Year at Time
-    // e.g., "February 1st, 2026 at 9:00 AM"
+    // e.g., "February 1st, 2026 at 9:00 AM", "Dec 14th 2026 at 3PM"
     const patterns = [
-        // Full date with time
+        // Full date with time (with minutes) - "December 14th 2026 at 9:00 AM"
         /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?\b/i,
-        // Month and day with time
+        // Full date with time (without minutes) - "December 14th 2026 at 3PM"
+        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})\s+at\s+(\d{1,2})\s*(am|pm)\b/i,
+        // Full date without time - "December 14th 2026"
+        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(st|nd|rd|th)?,?\s+(\d{4})\b/i,
+        // Month and day with time (with minutes)
         /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(st|nd|rd|th)?\s+(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?\b/i,
-        // Specific date format
+        // ISO date format
         /\b(\d{4})-(\d{2})-(\d{2})\s+(?:at\s+)?(\d{1,2}):(\d{2})\b/,
     ];
 
@@ -385,8 +392,13 @@ function parseOnClause(tokens, unit) {
         }
     }
 
-    // Monthly: parse month days
+    // Monthly: check for weekday position first (e.g., "first wednesday of the month")
     if (unit === 'month') {
+        const weekdayPos = parseWeekdayPosition(text);
+        if (weekdayPos) {
+            return { weekday_position: weekdayPos };
+        }
+
         const monthDays = parseMonthDays(text);
         if (monthDays.length > 0) {
             return { month_days: monthDays };
