@@ -1,6 +1,6 @@
 {
   "name": "natty-sched",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Natural language scheduler - Convert human-readable schedules to JSON format with next execution time calculation. Supports complex patterns like 'every 3 days', 'weekdays at 9am', 'monthly on the 15th', with typo tolerance.",
   "main": "index.js",
   "scripts": {
