@@ -1,10 +1,12 @@
 {
   "name": "natty-sched",
-  "version": "1.1.0",
-  "description": "Natural language scheduler - Convert human-readable schedules to JSON format with next execution time calculation. Supports complex patterns like 'every 3 days', 'weekdays at 9am', 'monthly on the 15th', with typo tolerance.",
+  "version": "1.2.0",
+  "description": "Natural language scheduler with autocomplete - Parse human-readable schedules to JSON, calculate next run times, and get smart suggestions. Supports 'every 3 days', 'weekdays at 9am', 'first Monday of month', with typo tolerance and 95+ templates.",
   "main": "index.js",
+  "unpkg": "dist/natty-sched.umd.js",
+  "browser": "dist/natty-sched.umd.js",
   "scripts": {
-    "test": "node test.js && node test-comprehensive.js && node test-calculator.js"
+    "test": "node test.js && node test-comprehensive.js && node test-calculator.js && node test-autocomplete-comprehensive.js"
   },
   "keywords": [
     "scheduler",
@@ -41,6 +43,7 @@
   "files": [
     "index.js",
     "src/",
+    "dist/",
     "README.md",
     "LICENSE"
   ]

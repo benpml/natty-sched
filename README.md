@@ -4,14 +4,16 @@ A comprehensive natural language parser that converts human-friendly schedule de
 
 ## 🎯 Key Features
 
+- ✅ **Autocomplete system** - 95+ templates + dynamic generation for frontend UIs
 - ✅ **Proper interval support** - Every N days/weeks/months/years
 - ✅ **Typo tolerance** - Handles common misspellings (dya→day, daus→days, bussiness→business)
 - ✅ **Alternative syntax** - Supports +, /, "except", "minus", "but not"
 - ✅ **Rich time expressions** - Early morning, late afternoon, evening, night
 - ✅ **Relative dates** - Tomorrow, next Tuesday, 5 fridays from now, in 40 days
 - ✅ **Weekday patterns** - Specific days, weekdays, weekends, business days, except patterns
-- ✅ **Monthly patterns** - Specific dates, last day, when it exists
+- ✅ **Monthly patterns** - Specific dates, weekday positions (first Monday), last day
 - ✅ **Yearly patterns** - Annual schedules with specific dates, last day of month
+- ✅ **Next run calculator** - Calculate next execution time from schedule JSON
 - ✅ **Proper validation** - Throws clear errors instead of silent fallbacks
 - ✅ **Zero dependencies** - Pure JavaScript implementation
 
@@ -289,6 +291,192 @@ const afterEnd = getNextScheduledTime(limitedSchedule, {
 console.log(afterEnd); // null (schedule ended)
 ```
 
+## 🎨 Autocomplete
+
+The library includes a powerful autocomplete system for building frontend UIs with schedule input suggestions.
+
+### Quick Example
+
+```javascript
+const { getSuggestions } = require('natty-sched');
+
+// Get suggestions as user types
+const suggestions = getSuggestions('every day', { limit: 5 });
+
+suggestions.forEach(s => {
+  console.log(s.label);    // Human-readable: "Every day at 9:00 AM"
+  console.log(s.value);    // Parsed JSON schedule ready to use
+  console.log(s.score);    // Relevance score for ranking
+});
+```
+
+### Features
+
+- **95+ Pre-defined Templates**: Common schedules across 7 categories (Daily, Weekly, Monthly, etc.)
+- **Dynamic Generation**: Intelligently generates suggestions based on partial input patterns
+- **Fuzzy Matching**: Handles typos and variations automatically
+- **Smart Ranking**: Combines relevance scoring with popularity weighting
+- **Category Filtering**: Browse suggestions by category
+- **Instant Validation**: All suggestions include pre-parsed JSON values
+
+### API
+
+#### `getSuggestions(partialInput, options?)`
+
+Get autocomplete suggestions based on partial user input.
+
+**Parameters:**
+- `partialInput` (string): The partial schedule text (e.g., "every", "monday at")
+- `options` (object, optional):
+  - `limit` (number): Max suggestions to return (default: 10)
+  - `category` (string): Filter by category ("Daily", "Weekly", "Monthly", etc.)
+  - `minScore` (number): Minimum relevance score 0-1 (default: 0.3)
+  - `similarityWeight` (number): Weight for text similarity in ranking (default: 0.7)
+  - `popularityWeight` (number): Weight for popularity in ranking (default: 0.3)
+  - `includeDynamic` (boolean): Include dynamically generated suggestions (default: true)
+  - `includeValue` (boolean): Parse and include JSON values (default: true)
+
+**Returns:** Array of suggestion objects:
+```javascript
+{
+  label: "Every day at 9:00 AM",      // Display text
+  input: "Every day at 9:00 AM",      // Input text to parse
+  category: "Daily",                   // Category name
+  value: { start: "...", repeat: ... }, // Parsed JSON schedule
+  score: 0.95,                        // Relevance score (0-1)
+  source: "template"                  // "template" or "dynamic"
+}
+```
+
+**Examples:**
+
+```javascript
+// Basic usage - get suggestions as user types
+const results = getSuggestions('every');
+// Returns suggestions like "Every day at 9:00 AM", "Every Monday at 9:00 AM", etc.
+
+// Limit results
+const top3 = getSuggestions('every day', { limit: 3 });
+
+// Filter by category
+const dailyOnly = getSuggestions('every', {
+  limit: 10,
+  category: 'Daily'
+});
+
+// Lower score threshold for more results
+const moreResults = getSuggestions('morning', {
+  minScore: 0.2
+});
+
+// Get suggestions without parsing (faster)
+const withoutJSON = getSuggestions('every', {
+  includeValue: false
+});
+```
+
+#### `getPopularSuggestions(limit?)`
+
+Get the most popular schedule suggestions (useful for empty input state).
+
+```javascript
+const popular = getPopularSuggestions(10);
+// Returns top 10 most popular schedules
+```
+
+#### `getSuggestionsByCategory(category, limit?)`
+
+Browse all suggestions in a specific category.
+
+```javascript
+const weekly = getSuggestionsByCategory('Weekly', 20);
+// Returns up to 20 weekly schedule suggestions
+```
+
+#### `getCategories()`
+
+Get list of all available categories.
+
+```javascript
+const categories = getCategories();
+// Returns: ["Daily", "Weekly", "Monthly", "Quarterly",
+//           "Yearly", "One-time", "Advanced"]
+```
+
+### Interactive Test Tool
+
+Test the autocomplete functionality interactively:
+
+```bash
+node test-autocomplete.js
+```
+
+**Commands:**
+- Type any partial schedule text to see suggestions
+- `/help` - Show help and commands
+- `/json` - Toggle JSON value display
+- `/category [name]` - Filter by category
+- `/limit [N]` - Set suggestion limit
+- `/popular` - Show popular suggestions
+- `/categories` - List all categories
+- `/exit` - Exit the tool
+
+### Frontend Integration
+
+Perfect for building autocomplete UIs:
+
+```javascript
+// React example
+function ScheduleInput() {
+  const [input, setInput] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+
+  const handleChange = (text) => {
+    setInput(text);
+    const results = getSuggestions(text, { limit: 5 });
+    setSuggestions(results);
+  };
+
+  const handleSelect = (suggestion) => {
+    setInput(suggestion.label);
+    // Use suggestion.value as the schedule JSON
+    onScheduleSelected(suggestion.value);
+  };
+
+  return (
+    <div>
+      <input value={input} onChange={e => handleChange(e.target.value)} />
+      <ul>
+        {suggestions.map(s => (
+          <li key={s.label} onClick={() => handleSelect(s)}>
+            {s.label}
+            <span className="score">{(s.score * 100).toFixed(0)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### How It Works
+
+1. **Template Matching**: Searches 95+ pre-defined templates using fuzzy text matching and keyword scoring
+2. **Pattern Detection**: Recognizes partial input patterns like "every N", "weekday at", "monthly on"
+3. **Dynamic Generation**: Generates suggestions on-the-fly for detected patterns
+4. **Smart Ranking**: Combines text similarity (70%) and popularity (30%) for optimal ordering
+5. **Instant Validation**: All suggestions are pre-validated and include parsed JSON
+
+### Autocomplete Categories
+
+- **Daily**: Every day, weekdays, weekends, business days, every N days
+- **Weekly**: Specific weekdays, multiple days, combinations
+- **Monthly**: Specific dates, last day, weekday positions (first Monday, etc.)
+- **Quarterly**: Every 3 months patterns
+- **Yearly**: Annual dates, leap day, seasonal
+- **One-time**: Tomorrow, next week, in N days, specific dates
+- **Advanced**: Complex patterns, exceptions, multiple constraints
+
 ## ✅ Validation
 
 The library provides proper validation and throws meaningful errors instead of silently falling back to defaults:
@@ -312,18 +500,26 @@ parse("ever 29 dyas at 9am")
 Run the test suite:
 
 ```bash
-npm test                          # Run basic tests
-node test-comprehensive.js        # Run all 67 comprehensive tests
-node comparison.js                # See feature comparison demo
+npm test                               # Run all tests (167 total)
+node test.js                           # Basic parsing tests (26 tests)
+node test-comprehensive.js             # Comprehensive parsing (67 tests)
+node test-calculator.js                # Next run calculator (14 tests)
+node test-autocomplete-comprehensive.js # Autocomplete tests (60 tests)
+node test-autocomplete.js              # Interactive autocomplete testing
 ```
 
-All tests pass, covering:
+All 167 tests pass, covering:
 - Basic intervals (minutes, hours, days, weeks, months, years)
 - Typo corrections
 - Weekday patterns with exceptions
+- Weekday positions (first Monday, last Friday, etc.)
 - Monthly and yearly patterns
 - Relative dates and future scheduling
 - Time variations (early, late, morning, afternoon, evening, night)
+- Next execution time calculation
+- Autocomplete template matching
+- Autocomplete dynamic generation
+- Autocomplete ranking and scoring
 - Edge cases (leap day, last day, when it exists)
 
 ## 🎮 Interactive Demo
