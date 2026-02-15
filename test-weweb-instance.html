@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WeWeb Instance Name Test</title>
+</head>
+<body>
+    <h1>Instance Name Detection Test</h1>
+    <div id="output"></div>
+
+    <script src="https://unpkg.com/natty-sched@1.2.0/dist/natty-sched.umd.js"></script>
+
+    <script>
+        const output = document.getElementById('output');
+
+        // Check all possible variations
+        const variations = [
+            'NattySched',
+            'nattySched',
+            'natty-sched',
+            'nattysched',
+            'NATTYSCHED'
+        ];
+
+        output.innerHTML += '<h2>Checking for instance names:</h2><ul>';
+        variations.forEach(name => {
+            const exists = typeof window[name] !== 'undefined';
+            output.innerHTML += '<li><strong>' + name + '</strong>: ' + (exists ? '✅ EXISTS' : '❌ not found') + '</li>';
+            if (exists && window[name]) {
+                output.innerHTML += '<ul>';
+                Object.keys(window[name]).forEach(key => {
+                    output.innerHTML += '<li>' + key + '</li>';
+                });
+                output.innerHTML += '</ul>';
+            }
+        });
+        output.innerHTML += '</ul>';
+
+        // Check what's actually on window
+        output.innerHTML += '<h2>All window properties containing "sched" or "natty":</h2><ul>';
+        Object.keys(window).filter(k =>
+            k.toLowerCase().includes('sched') || k.toLowerCase().includes('natty')
+        ).forEach(key => {
+            output.innerHTML += '<li>' + key + ' (type: ' + typeof window[key] + ')</li>';
+        });
+        output.innerHTML += '</ul>';
+    </script>
+</body>
+</html>

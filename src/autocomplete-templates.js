@@ -105,17 +105,27 @@ const YEARLY_TEMPLATES = [
 const ONETIME_TEMPLATES = [
     { label: "Tomorrow at 9:00 AM", input: "Tomorrow at 9:00 AM", category: "One-time", keywords: ["tomorrow", "next", "day"], popularity: 10 },
     { label: "Tomorrow at 2:00 PM", input: "Tomorrow at 2:00 PM", category: "One-time", keywords: ["tomorrow", "afternoon"], popularity: 8 },
+    { label: "Today at 5:00 PM", input: "Tomorrow at 5:00 PM", category: "One-time", keywords: ["today", "later"], popularity: 9 },
+    { label: "Today at 3:00 PM", input: "Tomorrow at 3:00 PM", category: "One-time", keywords: ["today"], popularity: 8 },
     { label: "Next Monday at 9:00 AM", input: "Next Monday at 9:00 AM", category: "One-time", keywords: ["next", "monday"], popularity: 9 },
     { label: "Next Tuesday at 10:00 AM", input: "Next Tuesday at 10:00 AM", category: "One-time", keywords: ["next", "tuesday"], popularity: 8 },
+    { label: "Next Tuesday at 3:00 PM", input: "Next Tuesday at 3:00 PM", category: "One-time", keywords: ["next", "tuesday"], popularity: 7 },
     { label: "Next Friday at 5:00 PM", input: "Next Friday at 5:00 PM", category: "One-time", keywords: ["next", "friday", "end"], popularity: 8 },
+    { label: "In a week at 9:00 AM", input: "In 7 days at 9:00 AM", category: "One-time", keywords: ["in", "week", "a"], popularity: 8 },
+    { label: "In 5 days at 9:00 AM", input: "In 5 days at 9:00 AM", category: "One-time", keywords: ["in", "5", "days"], popularity: 7 },
     { label: "In 7 days at 9:00 AM", input: "In 7 days at 9:00 AM", category: "One-time", keywords: ["in", "7", "days", "week"], popularity: 7 },
     { label: "In 30 days at 10:00 AM", input: "In 30 days at 10:00 AM", category: "One-time", keywords: ["in", "30", "days", "month"], popularity: 6 },
+    { label: "In an hour", input: "In 1 hour", category: "One-time", keywords: ["in", "an", "hour"], popularity: 7 },
     { label: "3 days from now at 2:00 PM", input: "3 days from now at 2:00 PM", category: "One-time", keywords: ["3", "days", "from", "now"], popularity: 7 },
+    { label: "3 weeks from now at 9:00 AM", input: "In 21 days at 9:00 AM", category: "One-time", keywords: ["3", "weeks", "from", "now"], popularity: 6 },
+    { label: "Two Fridays from now at 5:00 PM", input: "In 2 fridays at 5:00 PM", category: "One-time", keywords: ["two", "fridays", "from"], popularity: 5 },
     { label: "5 fridays from now at 3:00 PM", input: "5 fridays from now at 3:00 PM", category: "One-time", keywords: ["5", "fridays", "from", "now"], popularity: 4 },
     { label: "Next week at 9:00 AM", input: "Next week at 9:00 AM", category: "One-time", keywords: ["next", "week"], popularity: 7 },
     { label: "Next month at midnight", input: "Next month at midnight", category: "One-time", keywords: ["next", "month"], popularity: 5 },
     { label: "Next quarter at 9:00 AM", input: "Next quarter at 9:00 AM", category: "One-time", keywords: ["next", "quarter"], popularity: 4 },
     { label: "End of the year at midnight", input: "End of the year at midnight", category: "One-time", keywords: ["end", "year"], popularity: 4 },
+    { label: "End of the month at 5:00 PM", input: "Last day of each month at 5:00 PM", category: "Monthly", keywords: ["end", "month"], popularity: 7 },
+    { label: "Start of the week at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["start", "week"], popularity: 6 },
     { label: "Later today at 4:00 PM", input: "Later today at 4:00 PM", category: "One-time", keywords: ["later", "today"], popularity: 6 },
     { label: "This Friday at 6:00 PM", input: "This Friday at 6:00 PM", category: "One-time", keywords: ["this", "friday"], popularity: 7 }
 ];
@@ -138,6 +148,75 @@ const ADVANCED_TEMPLATES = [
     { label: "Every 21 days at 10:00 AM", input: "Every 21 days at 10:00 AM", category: "Advanced", keywords: ["every", "21", "days"], popularity: 3 }
 ];
 
+// Time-first patterns - when users start with time
+const TIMEFIRST_TEMPLATES = [
+    { label: "At 9:00 AM every day", input: "At 9:00 AM every day", category: "Time-first", keywords: ["at", "9", "9am", "morning"], popularity: 9 },
+    { label: "At 2:00 PM every weekday", input: "At 2:00 PM every weekday", category: "Time-first", keywords: ["at", "2", "2pm", "afternoon"], popularity: 8 },
+    { label: "At 5:00 PM on Fridays", input: "At 5:00 PM on Fridays", category: "Time-first", keywords: ["at", "5", "5pm", "friday"], popularity: 8 },
+    { label: "At 10:00 AM on Mondays", input: "At 10:00 AM on Mondays", category: "Time-first", keywords: ["at", "10", "10am", "monday"], popularity: 7 },
+    { label: "At noon every day", input: "At noon every day", category: "Time-first", keywords: ["at", "noon", "12pm"], popularity: 7 },
+    { label: "At midnight every day", input: "At midnight every day", category: "Time-first", keywords: ["at", "midnight", "12am"], popularity: 6 },
+    { label: "9:00 AM every day", input: "Every day at 9:00 AM", category: "Time-first", keywords: ["9", "9am", "9:00"], popularity: 8 },
+    { label: "9am every day", input: "Every day at 9:00 AM", category: "Time-first", keywords: ["9am"], popularity: 9 },
+    { label: "2pm every day", input: "Every day at 2:00 PM", category: "Time-first", keywords: ["2pm"], popularity: 8 },
+    { label: "5pm every Friday", input: "Every Friday at 5:00 PM", category: "Time-first", keywords: ["5pm"], popularity: 8 },
+    { label: "Morning every day", input: "Every day at 9:00 AM", category: "Time-first", keywords: ["morning", "early"], popularity: 9 },
+    { label: "Afternoon every day", input: "Every day at 2:00 PM", category: "Time-first", keywords: ["afternoon"], popularity: 8 },
+    { label: "Evening every day", input: "Every day at 6:00 PM", category: "Time-first", keywords: ["evening"], popularity: 8 },
+    { label: "Early morning every weekday", input: "Every weekday at 7:00 AM", category: "Time-first", keywords: ["early", "morning"], popularity: 7 },
+    { label: "09:00 every day", input: "Every day at 9:00 AM", category: "Time-first", keywords: ["09:00", "09"], popularity: 6 }
+];
+
+// Natural language alternatives
+const ALTERNATIVE_TEMPLATES = [
+    { label: "Each day at 9:00 AM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["each", "day"], popularity: 9 },
+    { label: "All days at 9:00 AM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["all", "days"], popularity: 9 },
+    { label: "Once a day at 9:00 AM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["once", "day", "per"], popularity: 8 },
+    { label: "Once per day at 9:00 AM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["once", "per", "day"], popularity: 7 },
+    { label: "Twice a day at 9:00 AM and 5:00 PM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["twice", "day"], popularity: 7 },
+    { label: "Once a week on Monday at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["once", "week", "per"], popularity: 8 },
+    { label: "Twice a week on Monday and Friday at 9:00 AM", input: "Mondays and Fridays at 9:00 AM", category: "Weekly", keywords: ["twice", "week"], popularity: 7 },
+    { label: "Once a month on the 1st at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["once", "month", "per"], popularity: 8 },
+    { label: "Each Monday at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["each", "monday"], popularity: 8 },
+    { label: "Each week on Monday at 9:00 AM", input: "Every week on Monday at 9:00 AM", category: "Weekly", keywords: ["each", "week"], popularity: 7 },
+    { label: "All Mondays at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["all", "mondays"], popularity: 9 },
+    { label: "All Tuesdays at 10:00 AM", input: "Every Tuesday at 10:00 AM", category: "Weekly", keywords: ["all", "tuesdays"], popularity: 8 },
+    { label: "All Wednesdays at 2:00 PM", input: "Every Wednesday at 2:00 PM", category: "Weekly", keywords: ["all", "wednesdays"], popularity: 8 },
+    { label: "All Thursdays at 3:00 PM", input: "Every Thursday at 3:00 PM", category: "Weekly", keywords: ["all", "thursdays"], popularity: 8 },
+    { label: "All Fridays at 5:00 PM", input: "Every Friday at 5:00 PM", category: "Weekly", keywords: ["all", "fridays"], popularity: 9 }
+];
+
+// Date and month patterns
+const DATE_TEMPLATES = [
+    { label: "January 1st at 9:00 AM", input: "Every year on January 1st at 9:00 AM", category: "Yearly", keywords: ["january", "jan", "1st"], popularity: 7 },
+    { label: "January 15th at 10:00 AM", input: "Every year on January 15th at 10:00 AM", category: "Yearly", keywords: ["january", "jan", "15"], popularity: 6 },
+    { label: "February 1st at 9:00 AM", input: "Every year on February 1st at 9:00 AM", category: "Yearly", keywords: ["february", "feb", "1st"], popularity: 6 },
+    { label: "March 1st at 9:00 AM", input: "Every year on March 1st at 9:00 AM", category: "Yearly", keywords: ["march", "mar", "1st"], popularity: 6 },
+    { label: "The 1st of each month at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["the", "1st", "each"], popularity: 9 },
+    { label: "The 15th of each month at noon", input: "Monthly on the 15th at noon", category: "Monthly", keywords: ["the", "15th", "each"], popularity: 8 },
+    { label: "On the 15th at 9:00 AM", input: "Monthly on the 15th at 9:00 AM", category: "Monthly", keywords: ["on", "15th"], popularity: 8 },
+    { label: "On the 1st at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["on", "1st"], popularity: 8 },
+    { label: "On the last day at 5:00 PM", input: "Monthly on the last day at 5:00 PM", category: "Monthly", keywords: ["on", "last", "day"], popularity: 7 },
+    { label: "On the first at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["on", "first"], popularity: 7 },
+    { label: "1st of each month at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["1st", "of", "each"], popularity: 8 },
+    { label: "15th of each month at noon", input: "Monthly on the 15th at noon", category: "Monthly", keywords: ["15th", "of", "each"], popularity: 7 },
+    { label: "1st at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["1st"], popularity: 7 },
+    { label: "Day 1 of each month at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["day", "1", "month"], popularity: 6 }
+];
+
+// Frequency and position patterns
+const FREQUENCY_TEMPLATES = [
+    { label: "Once a day at 9:00 AM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["once", "a", "day"], popularity: 8 },
+    { label: "Once a week on Monday at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["once", "a", "week"], popularity: 8 },
+    { label: "Once a month on the 1st at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["once", "a", "month"], popularity: 7 },
+    { label: "Twice a day at 9:00 AM and 5:00 PM", input: "Every day at 9:00 AM", category: "Daily", keywords: ["twice", "a", "day"], popularity: 7 },
+    { label: "Twice a week on Monday and Friday at 9:00 AM", input: "Mondays and Fridays at 9:00 AM", category: "Weekly", keywords: ["twice", "a", "week"], popularity: 7 },
+    { label: "At the beginning of each month at 9:00 AM", input: "Monthly on the 1st at 9:00 AM", category: "Monthly", keywords: ["at", "beginning", "each", "month"], popularity: 7 },
+    { label: "At the end of each month at 5:00 PM", input: "Monthly on the last day at 5:00 PM", category: "Monthly", keywords: ["at", "end", "each", "month"], popularity: 7 },
+    { label: "At the end of each quarter at 5:00 PM", input: "Quarterly on the 1st at 5:00 PM", category: "Quarterly", keywords: ["at", "end", "quarter"], popularity: 5 },
+    { label: "At the beginning of each week at 9:00 AM", input: "Every Monday at 9:00 AM", category: "Weekly", keywords: ["at", "beginning", "week"], popularity: 6 }
+];
+
 // Combine all templates
 const ALL_TEMPLATES = [
     ...DAILY_TEMPLATES,
@@ -146,7 +225,11 @@ const ALL_TEMPLATES = [
     ...QUARTERLY_TEMPLATES,
     ...YEARLY_TEMPLATES,
     ...ONETIME_TEMPLATES,
-    ...ADVANCED_TEMPLATES
+    ...ADVANCED_TEMPLATES,
+    ...TIMEFIRST_TEMPLATES,
+    ...ALTERNATIVE_TEMPLATES,
+    ...DATE_TEMPLATES,
+    ...FREQUENCY_TEMPLATES
 ];
 
 /**
@@ -201,6 +284,10 @@ module.exports = {
     YEARLY_TEMPLATES,
     ONETIME_TEMPLATES,
     ADVANCED_TEMPLATES,
+    TIMEFIRST_TEMPLATES,
+    ALTERNATIVE_TEMPLATES,
+    DATE_TEMPLATES,
+    FREQUENCY_TEMPLATES,
     getAllTemplates,
     getTemplatesByCategory,
     getCategories,

@@ -5,6 +5,7 @@
 
 const { normalizeInput } = require('./tokenizer');
 const { parseNaturalSchedule } = require('./parser');
+const { endsWithIncompletePhrase, endsWithAt, endsWithOn } = require('./autocomplete-normalizer');
 
 const COMMON_TIMES = [
     '9:00 AM', '10:00 AM', '2:00 PM', '5:00 PM',
@@ -21,7 +22,8 @@ function generatePrefixCompletions(userInput) {
 
     // Pattern 1: Incomplete day/week/month pattern needing time
     // "every day", "every monday", "weekdays", "every week on monday", etc.
-    if (isIncompleteSchedule(normalized)) {
+    // BUT only if it doesn't already end with "at" and isn't an incomplete phrase
+    if (isIncompleteSchedule(normalized) && !endsWithAt(userInput) && !endsWithIncompletePhrase(userInput)) {
         COMMON_TIMES.slice(0, 6).forEach(time => {
             completions.push({
                 input: `${userInput} at ${time}`,
@@ -55,7 +57,7 @@ function generatePrefixCompletions(userInput) {
     // Pattern 3: Incomplete "and" pattern for multiple days
     // "every monday and", "every week on monday and", etc.
     const andMatch = userInput.match(/\s+(and|,)\s*$/i);
-    if (andMatch) {
+    if (andMatch && !endsWithAt(userInput)) {
         // Extract already mentioned days to avoid suggesting them again
         const alreadyMentioned = new Set();
         const dayPattern = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi;
@@ -67,13 +69,12 @@ function generatePrefixCompletions(userInput) {
         const allWeekdays = ['Wednesday', 'Friday', 'Thursday', 'Tuesday', 'Monday', 'Saturday', 'Sunday'];
         const availableWeekdays = allWeekdays.filter(day => !alreadyMentioned.has(day.toLowerCase()));
 
+        // First suggest just adding the weekday (without time)
         availableWeekdays.slice(0, 3).forEach(day => {
-            COMMON_TIMES.slice(0, 3).forEach(time => {
-                completions.push({
-                    input: `${userInput} ${day} at ${time}`,
-                    source: 'dynamic',
-                    pattern: 'append_weekday'
-                });
+            completions.push({
+                input: `${userInput} ${day}`,
+                source: 'dynamic',
+                pattern: 'append_weekday'
             });
         });
     }
@@ -81,12 +82,12 @@ function generatePrefixCompletions(userInput) {
     // Pattern 4: Incomplete "on" pattern
     // "on tuesday", "on the", "monthly on", etc.
     const onMatch = userInput.match(/\b(on|every\s+week\s+on|monthly\s+on)\s+([a-z]*)?$/i);
-    if (onMatch) {
+    if (onMatch && !endsWithIncompletePhrase(userInput)) {
         const prefix = onMatch[0];
         const partial = onMatch[2] || '';
 
-        // If it's a weekday pattern
-        if (partial && /^[a-z]{2,}/i.test(partial)) {
+        // If it's a weekday pattern and doesn't already end with "at"
+        if (partial && /^[a-z]{2,}/i.test(partial) && !endsWithAt(userInput)) {
             COMMON_TIMES.slice(0, 4).forEach(time => {
                 completions.push({
                     input: `${userInput} at ${time}`,
@@ -95,13 +96,13 @@ function generatePrefixCompletions(userInput) {
                 });
             });
         }
-        // If it's "on the" (monthly pattern)
+        // If it's "on the" (monthly pattern) - don't append time yet, it's incomplete
         else if (/on\s+the\s*$/i.test(userInput)) {
             ['1st', '15th', 'last day'].forEach(day => {
                 completions.push({
-                    input: `${userInput} ${day} at 9:00 AM`,
+                    input: `${userInput} ${day}`,
                     source: 'dynamic',
-                    pattern: 'complete_monthly'
+                    pattern: 'complete_monthly_day'
                 });
             });
         }

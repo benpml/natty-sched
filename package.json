@@ -1,6 +1,6 @@
 {
   "name": "natty-sched",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Natural language scheduler with autocomplete - Parse human-readable schedules to JSON, calculate next run times, and get smart suggestions. Supports 'every 3 days', 'weekdays at 9am', 'first Monday of month', with typo tolerance and 95+ templates.",
   "main": "index.js",
   "unpkg": "dist/natty-sched.umd.js",
@@ -46,5 +46,10 @@
     "dist/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "browserify": "^17.0.1",
+    "webpack": "^5.105.2",
+    "webpack-cli": "^6.0.1"
+  }
 }
