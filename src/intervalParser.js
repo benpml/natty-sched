@@ -171,7 +171,7 @@ function parseWeekdays(text) {
     }
 
     // Handle "except" patterns
-    const exceptMatch = text.match(/\bexcept\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sundays|mondays|tuesdays|wednesdays|thursdays|fridays|saturdays)\b/i);
+    const exceptMatch = text.match(/\bexcept\s+(?:for\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sundays|mondays|tuesdays|wednesdays|thursdays|fridays|saturdays)\b/i);
     if (exceptMatch) {
         const exceptDay = exceptMatch[1].replace(/s$/, '').toLowerCase();
         const exceptIndex = WEEKDAY_FULL.indexOf(exceptDay);
@@ -224,6 +224,8 @@ function parseMonthDays(text) {
     const specificPatterns = [
         // "on the 4th", "on the 15th" (ordinal suffixes are optional after normalization)
         /\bon\s+the\s+(\d+)(?:st|nd|rd|th)?\b/gi,
+        // "on the 1 and 15", "on the 1, 15 and 20" - continuation with "and" or ","
+        /\b(?:and|,)\s+(\d+)(?:st|nd|rd|th)?\b/gi,
         // "4th day of", "15th day of", "4 day of" (after normalization)
         /\b(\d+)(?:st|nd|rd|th)?\s+day\s+of\b/gi,
         // "day 4", "day 15"
@@ -243,10 +245,14 @@ function parseMonthDays(text) {
     }
 
     // If we didn't find any specific patterns, fall back to a more general pattern
-    // but exclude numbers that are clearly part of "every N" patterns
+    // but exclude numbers that are clearly part of other patterns
     if (days.length === 0) {
-        // Remove "every N" patterns temporarily to avoid false matches
-        const cleanedText = text.replace(/\bevery\s+\d+\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\b/gi, '');
+        // Remove patterns that contain numbers we don't want to capture as month days
+        let cleanedText = text.replace(/\bevery\s+\d+\s+(minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years)\b/gi, '');
+        // Remove time expressions: "at N", "N am", "N pm", "N:NN"
+        cleanedText = cleanedText.replace(/\bat\s+\d+/gi, '');
+        cleanedText = cleanedText.replace(/\b\d+\s*:\s*\d+\s*(am|pm)?\b/gi, '');
+        cleanedText = cleanedText.replace(/\b\d+\s*(am|pm)\b/gi, '');
 
         const dayPattern = /\b(\d+)(?:st|nd|rd|th)?\b/g;
         let match;

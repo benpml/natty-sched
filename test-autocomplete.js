@@ -24,7 +24,8 @@ let config = {
     limit: 10,
     showJson: false,
     category: null,
-    minScore: 0.3
+    minScore: 0.3,
+    mode: 'schedule'
 };
 
 /**
@@ -43,8 +44,8 @@ function printHeader() {
     print('║        Natural Scheduler - Autocomplete Test Tool           ║', 'cyan');
     print('╚══════════════════════════════════════════════════════════════╝', 'cyan');
     print('');
-    print('Type partial schedule text to see suggestions.', 'dim');
-    print('Commands: /help /exit /clear /json /category /limit /score', 'dim');
+    print('Type partial text to see suggestions.', 'dim');
+    print('Commands: /help /exit /clear /json /category /limit /score /mode', 'dim');
     print('', 'reset');
 }
 
@@ -59,6 +60,9 @@ function printHelp() {
     print('  /exit              Exit the test tool', 'gray');
     print('  /clear             Clear the screen', 'gray');
     print('  /json              Toggle JSON value display', 'gray');
+    print('  /mode [type]       Set mode: schedule or datetime', 'gray');
+    print('  /schedule          Shortcut for schedule mode', 'gray');
+    print('  /datetime          Shortcut for datetime mode', 'gray');
     print('  /category [name]   Filter by category (or show all)', 'gray');
     print('  /limit [number]    Set suggestion limit (default: 10)', 'gray');
     print('  /score [number]    Set minimum score threshold (default: 0.3)', 'gray');
@@ -67,11 +71,11 @@ function printHelp() {
     print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
     print('\n  EXAMPLES', 'bright');
     print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
-    print('  every              See suggestions starting with "every"', 'gray');
-    print('  every day          See daily schedule suggestions', 'gray');
-    print('  monday at          See Monday schedule suggestions', 'gray');
-    print('  monthly on         See monthly schedule suggestions', 'gray');
-    print('  first              See ordinal-based suggestions', 'gray');
+    print('  every              See schedule suggestions', 'gray');
+    print('  monday at          See schedule time suggestions', 'gray');
+    print('  next thu           See datetime suggestions (datetime mode)', 'gray');
+    print('  today at 5         See datetime suggestions (datetime mode)', 'gray');
+    print('  feb 14 at 8 am     See absolute date suggestions (datetime mode)', 'gray');
     print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n', 'cyan');
 }
 
@@ -83,6 +87,7 @@ function printConfig() {
     print(`  • Limit: ${config.limit} suggestions`, 'dim');
     print(`  • Min Score: ${config.minScore}`, 'dim');
     print(`  • Show JSON: ${config.showJson ? 'Yes' : 'No'}`, 'dim');
+    print(`  • Mode: ${config.mode}`, 'dim');
     print(`  • Category Filter: ${config.category || 'None (all)'}`, 'dim');
     print('');
 }
@@ -94,9 +99,13 @@ function formatSuggestion(suggestion, index) {
     const number = `${index + 1}.`.padEnd(4);
     const score = suggestion.score ? ` [${(suggestion.score * 100).toFixed(0)}%]` : '';
     const category = suggestion.category ? ` (${suggestion.category})` : '';
-    const source = suggestion.source === 'dynamic' ? ' 🔄' : '';
+    const source = suggestion.source === 'dynamic' ? ' 🔄' : suggestion.source === 'datetime' ? ' ⏰' : '';
 
     print(`${number}${suggestion.label}${colors.gray}${score}${category}${source}${colors.reset}`, 'green');
+
+    if (suggestion.source === 'datetime' && suggestion.value && suggestion.value.datetime) {
+        print(`      ${suggestion.value.datetime}`, 'dim');
+    }
 
     if (config.showJson && suggestion.value) {
         const json = JSON.stringify(suggestion.value, null, 2)
@@ -140,7 +149,39 @@ function processInput(input) {
                 print(`\n✓ JSON display ${config.showJson ? 'enabled' : 'disabled'}`, 'green');
                 return;
 
+            case 'mode':
+                if (args.length > 0) {
+                    const mode = args[0].toLowerCase();
+                    if (mode === 'schedule' || mode === 'datetime') {
+                        config.mode = mode;
+                        if (mode !== 'schedule') {
+                            config.category = null;
+                        }
+                        print(`\n✓ Mode set to: ${config.mode}`, 'green');
+                    } else {
+                        print('\n✗ Invalid mode. Use "schedule" or "datetime".', 'red');
+                    }
+                } else {
+                    print(`\n✓ Current mode: ${config.mode}`, 'green');
+                }
+                return;
+
+            case 'schedule':
+                config.mode = 'schedule';
+                print('\n✓ Mode set to: schedule', 'green');
+                return;
+
+            case 'datetime':
+                config.mode = 'datetime';
+                config.category = null;
+                print('\n✓ Mode set to: datetime', 'green');
+                return;
+
             case 'category':
+                if (config.mode !== 'schedule') {
+                    print('\n✗ Category filters only apply in schedule mode.', 'red');
+                    return;
+                }
                 if (args.length > 0) {
                     config.category = args.join(' ');
                     print(`\n✓ Category filter set to: ${config.category}`, 'green');
@@ -180,9 +221,9 @@ function processInput(input) {
 
             case 'popular':
                 print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
-                print('  POPULAR SUGGESTIONS', 'bright');
+                print(`  ${config.mode.toUpperCase()} SUGGESTIONS`, 'bright');
                 print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
-                const popular = getSuggestions('', { limit: config.limit });
+                const popular = getSuggestions('', { limit: config.limit, mode: config.mode });
                 if (popular.length === 0) {
                     print('\n  No suggestions found.', 'dim');
                 } else {
@@ -224,20 +265,23 @@ function processInput(input) {
     // Get suggestions
     try {
         print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
-        print(`  SUGGESTIONS FOR: "${trimmed}"`, 'bright');
+        print(`  ${config.mode.toUpperCase()} SUGGESTIONS FOR: "${trimmed}"`, 'bright');
         print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'cyan');
 
         const suggestions = getSuggestions(trimmed, {
             limit: config.limit,
-            category: config.category,
-            minScore: config.minScore
+            category: config.mode === 'schedule' ? config.category : null,
+            minScore: config.minScore,
+            mode: config.mode
         });
 
         if (suggestions.length === 0) {
             print('\n  No suggestions found. Try:', 'dim');
             print('  • Different keywords', 'dim');
             print('  • Lower minimum score with /score 0.1', 'dim');
-            print('  • Remove category filter with /category', 'dim');
+            if (config.mode === 'schedule') {
+                print('  • Remove category filter with /category', 'dim');
+            }
         } else {
             print(`\n  Found ${suggestions.length} suggestion(s):\n`, 'dim');
             suggestions.forEach((suggestion, index) => formatSuggestion(suggestion, index));
@@ -255,12 +299,14 @@ function processInput(input) {
  */
 function main() {
     printHeader();
-    print('Welcome! Type a partial schedule to see autocomplete suggestions.\n', 'green');
+    print('Welcome! Type partial text to see autocomplete suggestions.\n', 'green');
     print('Try these examples:', 'dim');
     print('  • "every"', 'dim');
     print('  • "every day"', 'dim');
     print('  • "monday at"', 'dim');
-    print('  • "first"', 'dim');
+    print('  • "/datetime"', 'dim');
+    print('  • "next thu"', 'dim');
+    print('  • "today at 5"', 'dim');
     print('\nType /help for more information.\n', 'dim');
 
     const rl = readline.createInterface({

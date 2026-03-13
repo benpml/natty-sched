@@ -48,10 +48,14 @@ function parseStart(context) {
     }
 
     // Look for explicit dates like "February 1st, 2026 at 9:00 AM"
-    const dateMatch = findDateTimePattern(tokens);
-    if (dateMatch) {
-        context.start = dateMatch;
-        return;
+    // Skip for recurring schedules where month+day is part of the recurrence spec, not a start date
+    const hasRecurrence = /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
+    if (!hasRecurrence) {
+        const dateMatch = findDateTimePattern(tokens);
+        if (dateMatch) {
+            context.start = dateMatch;
+            return;
+        }
     }
 
     // Look for relative dates like "tomorrow", "next tuesday", "this friday"
@@ -113,23 +117,27 @@ function parseRepeat(context) {
 
     // Check for one-time future date patterns that shouldn't repeat
     // e.g., "5 fridays from now", "in 40 days", "30 days from now", "next tuesday"
-    const oneTimeFuturePatterns = [
-        /\b\d+\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\s+from\s+now\b/,
-        /\bin\s+\d+\s+(days?|weeks?|months?|years?)\b/,
-        /\b\d+\s+(days?|weeks?|months?|years?)\s+from\s+now\b/,
-        /\b(next|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/,
-        /\b(tomorrow|today|yesterday)\b/,
-        /\bnext\s+(week|month|quarter|year)\b/,
-        /\b(beginning|start|end|last day)\s+of\s+(next|this|the)\s+(month|quarter|year)\b/,
-        // Full dates with explicit year (e.g., "December 14th 2026", "Dec 14 2026", "2026-12-14")
-        /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(st|nd|rd|th)?\s+\d{4}\b/i,
-        /\b\d{4}-\d{2}-\d{2}\b/,
-    ];
+    // BUT skip this check if an explicit recurrence keyword is present (e.g., "every day starting tomorrow")
+    const hasRecurrenceKeyword = /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
+    if (!hasRecurrenceKeyword) {
+        const oneTimeFuturePatterns = [
+            /\b\d+\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\s+from\s+now\b/,
+            /\bin\s+\d+\s+(days?|weeks?|months?|years?)\b/,
+            /\b\d+\s+(days?|weeks?|months?|years?)\s+from\s+now\b/,
+            /\b(next|this)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/,
+            /\b(tomorrow|today|yesterday)\b/,
+            /\bnext\s+(week|month|quarter|year)\b/,
+            /\b(beginning|start|end|last day)\s+of\s+(next|this|the)\s+(month|quarter|year)\b/,
+            // Full dates with explicit year (e.g., "December 14th 2026", "Dec 14 2026", "2026-12-14")
+            /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(st|nd|rd|th)?\s+\d{4}\b/i,
+            /\b\d{4}-\d{2}-\d{2}\b/,
+        ];
 
-    for (const pattern of oneTimeFuturePatterns) {
-        if (pattern.test(text)) {
-            context.repeat = null;
-            return;
+        for (const pattern of oneTimeFuturePatterns) {
+            if (pattern.test(text)) {
+                context.repeat = null;
+                return;
+            }
         }
     }
 
@@ -201,9 +209,17 @@ function findDateTimePattern(tokens) {
         /\b(\d{4})-(\d{2})-(\d{2})\s+(?:at\s+)?(\d{1,2}):(\d{2})\b/,
     ];
 
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
+    for (let pi = 0; pi < patterns.length; pi++) {
+        const match = text.match(patterns[pi]);
         if (match) {
+            // Pattern index 3 (month+day+time, no year) has capture groups shifted:
+            // [1]=month, [2]=day, [3]=suffix, [4]=hours, [5]=min, [6]=ampm
+            // parseDateTime expects [4]=year, [5]=hours, [6]=min, [7]=ampm
+            // Insert null year at position 4 to realign
+            if (pi === 3) {
+                const adjusted = [match[0], match[1], match[2], match[3], null, match[4], match[5], match[6]];
+                return parseDateTime(adjusted);
+            }
             return parseDateTime(match);
         }
     }

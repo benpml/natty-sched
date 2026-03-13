@@ -4,8 +4,9 @@
 
 const { parseNaturalSchedule } = require('./src/parser');
 const { getNextScheduledTime } = require('./src/calculator');
-const { getSuggestions, getSuggestionsByCategory, getPopularSuggestions } = require('./src/autocomplete');
+const { getSuggestions, getSuggestionsByCategory, getPopularSuggestions } = require('./src/unified-autocomplete');
 const { getTemplatesByCategory, getCategories } = require('./src/autocomplete-templates');
+const { getDateTimeSuggestions, resolveDateTime } = require('./src/datetime-autocomplete');
 
 module.exports = {
     // Core parsing and calculation
@@ -17,6 +18,8 @@ module.exports = {
     // Autocomplete functionality
     getSuggestions,
     autocomplete: getSuggestions, // Alias
+    getDateTimeSuggestions,
+    resolveDateTime,
     getSuggestionsByCategory,
     getPopularSuggestions,
     getTemplatesByCategory,

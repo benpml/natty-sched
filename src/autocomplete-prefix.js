@@ -54,6 +54,17 @@ function generatePrefixCompletions(userInput) {
         }
     }
 
+    // Pattern 2b: Ends with "at" - suggest common time fills directly
+    if (endsWithAt(userInput)) {
+        COMMON_TIMES.slice(0, 8).forEach(time => {
+            completions.push({
+                input: `${userInput} ${time}`,
+                source: 'dynamic',
+                pattern: 'append_time_after_at'
+            });
+        });
+    }
+
     // Pattern 3: Incomplete "and" pattern for multiple days
     // "every monday and", "every week on monday and", etc.
     const andMatch = userInput.match(/\s+(and|,)\s*$/i);

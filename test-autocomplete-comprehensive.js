@@ -86,7 +86,7 @@ assertGreaterThan(everyNPattern.length, 0, 'Pattern "every 2" generates suggesti
 // Test 3.2: "weekday at" pattern generates suggestions
 const weekdayAtPattern = getSuggestions('monday at', { limit: 5 });
 assertGreaterThan(weekdayAtPattern.length, 0, 'Pattern "monday at" generates suggestions');
-assert(weekdayAtPattern.some(s => s.source === 'template' || s.source === 'dynamic'),
+assert(weekdayAtPattern.some(s => ['template', 'dynamic', 'datetime'].includes(s.source)),
     'Results have source property');
 
 // Test 3.3: "first/second/etc weekday" pattern generates suggestions

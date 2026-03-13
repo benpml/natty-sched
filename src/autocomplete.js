@@ -7,6 +7,7 @@ const { generateFromPatterns, validateSuggestions } = require('./autocomplete-pa
 const { generatePrefixCompletions, validatePrefixCompletions } = require('./autocomplete-prefix');
 const { normalizeInput } = require('./tokenizer');
 const { normalizeForMatching } = require('./autocomplete-normalizer');
+const { getDateTimeSuggestions } = require('./datetime-autocomplete');
 
 /**
  * Adjust template suggestion to match user's input format
@@ -218,8 +219,13 @@ function getSuggestions(partialInput, options = {}) {
         similarityWeight = 0.7,
         popularityWeight = 0.3,
         includeDynamic = true,
-        includeValue = true
+        includeValue = true,
+        mode = 'schedule'
     } = options;
+
+    if (mode === 'datetime') {
+        return getDateTimeSuggestions(partialInput, { limit, minScore, includeValue, referenceDate: options.referenceDate });
+    }
 
     // Handle empty input
     if (!partialInput || partialInput.trim().length === 0) {
