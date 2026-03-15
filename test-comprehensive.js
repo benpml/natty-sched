@@ -1,4 +1,4 @@
-const { parse } = require('./index');
+const { parseNaturalSchedule: parse } = require('./src/parser');
 
 // Comprehensive test cases from user requirements
 const testCases = [

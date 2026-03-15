@@ -5,7 +5,19 @@
  */
 
 const fs = require('fs');
-const { getSuggestions } = require('./src/unified-autocomplete');
+const {
+  autocomplete,
+  autocompleteSchedule,
+  autocompleteDatetime,
+  resolveDatetimeString,
+  resolveScheduleString,
+  resolveString
+} = require('./index');
+
+const resolveDatetimeDate = (...args) => {
+  const value = resolveDatetimeString(...args);
+  return value ? new Date(value.timestamp) : null;
+};
 
 const referenceDate = new Date('2026-03-03T10:00:00');
 
@@ -156,9 +168,7 @@ console.log(`Loaded ${scheduleCases.length} schedule test cases\n`);
 let schedPass = 0, schedFail = 0;
 for (const input of scheduleCases) {
   const beforeFailed = failed;
-  const results = getSuggestions(input, {
-    mode: 'schedule', limit: 5, includeValue: true, referenceDate
-  });
+  const results = autocompleteSchedule(input, { limit: 5, includeValue: true, referenceDate });
   validateScheduleResults(input, results);
   if (failed > beforeFailed) {
     schedFail++;
@@ -176,9 +186,7 @@ console.log(`Loaded ${datetimeCases.length} datetime test cases\n`);
 let dtPass = 0, dtFail = 0;
 for (const input of datetimeCases) {
   const beforeFailed = failed;
-  const results = getSuggestions(input, {
-    mode: 'datetime', limit: 5, includeValue: true, referenceDate
-  });
+  const results = autocompleteDatetime(input, { limit: 5, includeValue: true, referenceDate });
   validateDatetimeResults(input, results);
   if (failed > beforeFailed) {
     dtFail++;
@@ -203,8 +211,8 @@ const deterministicInputs = [
 
 let deterministicPass = true;
 for (const input of deterministicInputs) {
-  const r1 = getSuggestions(input, { limit: 5, includeValue: true, referenceDate });
-  const r2 = getSuggestions(input, { limit: 5, includeValue: true, referenceDate });
+  const r1 = autocomplete(input, { limit: 5, includeValue: true, referenceDate });
+  const r2 = autocomplete(input, { limit: 5, includeValue: true, referenceDate });
   const s1 = JSON.stringify(r1);
   const s2 = JSON.stringify(r2);
   if (s1 !== s2) {
@@ -216,6 +224,180 @@ if (deterministicPass) {
   passed++;
   console.log(`Determinism: All ${deterministicInputs.length} inputs produce identical results\n`);
 }
+
+// ---- Targeted datetime regression checks ----
+console.log('=== Datetime Regressions ===\n');
+
+const issueReferenceDate = new Date('2026-03-15T13:37:00');
+
+function datetimeInputs(input) {
+  return autocomplete(input, {
+    limit: 10,
+    includeValue: true,
+    referenceDate: issueReferenceDate
+  }).map(r => r.input);
+}
+
+function assertIncludesSuggestion(input, expected) {
+  const inputs = datetimeInputs(input);
+  assert(inputs.includes(expected), `Datetime regression "${input}": includes "${expected}" (got ${JSON.stringify(inputs)})`);
+}
+
+function assertOmitsSuggestion(input, unexpected) {
+  const inputs = datetimeInputs(input);
+  assert(!inputs.includes(unexpected), `Datetime regression "${input}": omits "${unexpected}" (got ${JSON.stringify(inputs)})`);
+}
+
+function assertResolvedLocal(input, expectedLocal) {
+  const resolved = resolveDatetimeDate(input, { referenceDate: issueReferenceDate });
+  const actualLocal = resolved
+    ? `${resolved.getFullYear()}-${String(resolved.getMonth() + 1).padStart(2, '0')}-${String(resolved.getDate()).padStart(2, '0')}T${String(resolved.getHours()).padStart(2, '0')}:${String(resolved.getMinutes()).padStart(2, '0')}:${String(resolved.getSeconds()).padStart(2, '0')}`
+    : null;
+  assert(actualLocal === expectedLocal, `Datetime regression "${input}": resolves to ${expectedLocal} (got ${actualLocal})`);
+}
+
+assertIncludesSuggestion('in 1 year', 'In 1 year at night');
+assertIncludesSuggestion('2 weeks from now', '2 weeks from now in the morning');
+assertIncludesSuggestion('in 2 days', 'In 2 days in the afternoon');
+assertIncludesSuggestion('next month', 'Next month in the morning');
+assertIncludesSuggestion('next year', 'Next year in the evening');
+assertIncludesSuggestion('2 weeks from friday', '2 weeks from Friday at 3 PM');
+assertIncludesSuggestion('today', 'This morning');
+assertIncludesSuggestion('today', 'Tonight');
+assert(datetimeInputs('early on thursday').length > 0,
+  'Datetime regression "early on thursday": returns suggestions');
+assert(datetimeInputs('early morning tuesday').length > 0,
+  'Datetime regression "early morning tuesday": returns suggestions');
+assert(datetimeInputs('late tuesday').length > 0,
+  'Datetime regression "late tuesday": returns suggestions');
+assert(datetimeInputs('5 thursda').length > 0,
+  'Datetime regression "5 thursda": returns suggestions');
+
+assertOmitsSuggestion('in 1 hour', 'In 1 hour night');
+assertOmitsSuggestion('in 1 year', 'In 1 year night');
+assertOmitsSuggestion('2 weeks from now', '2 weeks from now morning');
+assertOmitsSuggestion('in 2 days', 'In 2 days afternoon');
+assertOmitsSuggestion('next month', 'Next month morning');
+assertOmitsSuggestion('next year', 'Next year evening');
+assertOmitsSuggestion('today', 'Today morning');
+assertOmitsSuggestion('today', 'Today night');
+assertOmitsSuggestion('tonight', 'Tonight at 9 AM');
+assertOmitsSuggestion('tonight', 'Tonight at 12 PM');
+assertOmitsSuggestion('tonight', 'This morning');
+assertOmitsSuggestion('tonight m', 'Tonight morning');
+assertResolvedLocal('tonight', '2026-03-15T20:00:00');
+assert(resolveDatetimeDate('tonight morning', { referenceDate: issueReferenceDate }) == null,
+  'Datetime regression "tonight morning": resolves to null');
+assert(resolveDatetimeDate('tonight at 9 am', { referenceDate: issueReferenceDate }) == null,
+  'Datetime regression "tonight at 9 am": resolves to null');
+assertResolvedLocal('tonight at 9 pm', '2026-03-15T21:00:00');
+assert(resolveDatetimeDate('now', { referenceDate: issueReferenceDate, excludePast: true }) != null,
+  'Datetime regression "now" with excludePast: resolves');
+assert(resolveDatetimeDate('yesterday', { referenceDate: issueReferenceDate, excludePast: true }) == null,
+  'Datetime regression "yesterday" with excludePast: resolves to null');
+
+const topLevelToday = autocompleteDatetime('today', issueReferenceDate, true, {
+  limit: 10,
+  includeValue: false
+}).map(r => r.input);
+assert(topLevelToday.includes('Today'), `Datetime regression top-level args: includes "Today" (got ${JSON.stringify(topLevelToday)})`);
+assert(!topLevelToday.includes('Today at 9 AM'), `Datetime regression top-level args: omits past "Today at 9 AM" (got ${JSON.stringify(topLevelToday)})`);
+
+const blankDefaults = autocompleteDatetime('', issueReferenceDate, false, {
+  limit: 10,
+  includeValue: false
+}).map(r => r.input);
+assert(JSON.stringify(blankDefaults) === JSON.stringify([
+  'Now',
+  'In 1 hour',
+  'Tomorrow morning',
+  'Monday at 8 AM',
+  'In 1 week',
+  '1 month from now',
+  'Next year',
+  'Tonight',
+  'Friday at 5 PM',
+  'Christmas'
+]), `Datetime regression blank defaults: exact order (got ${JSON.stringify(blankDefaults)})`);
+
+const unifiedBlankDefaults = autocomplete('', issueReferenceDate, false, {
+  limit: 10,
+  includeValue: false
+}).map(r => r.input);
+assert(JSON.stringify(unifiedBlankDefaults) === JSON.stringify(blankDefaults),
+  `Datetime regression unified blank defaults: match direct datetime defaults (got ${JSON.stringify(unifiedBlankDefaults)})`);
+
+const filteredBlankDefaults = autocompleteDatetime('', new Date('2026-03-16T15:00:00'), true, {
+  limit: 10,
+  includeValue: true
+});
+assert(filteredBlankDefaults.length > 0, 'Datetime regression filtered blank defaults: returns suggestions');
+assert(filteredBlankDefaults.every(r => r.value.timestamp >= new Date('2026-03-16T15:00:00').getTime()),
+  `Datetime regression filtered blank defaults: all timestamps are >= referenceDate (got ${JSON.stringify(filteredBlankDefaults.map(r => r.input))})`);
+assert(filteredBlankDefaults.some(r => r.input === 'Now'),
+  `Datetime regression filtered blank defaults: includes "Now" (got ${JSON.stringify(filteredBlankDefaults.map(r => r.input))})`);
+assert(filteredBlankDefaults.every(r => r.input !== 'Monday at 8 AM'),
+  `Datetime regression filtered blank defaults: omits past "Monday at 8 AM" (got ${JSON.stringify(filteredBlankDefaults.map(r => r.input))})`);
+
+const blankDefaultsAlias = autocompleteDatetime('', issueReferenceDate, false, {
+  limit: 10,
+  includeValue: false
+}).map(r => r.input);
+assert(JSON.stringify(blankDefaultsAlias) === JSON.stringify(blankDefaults),
+  `Datetime regression autocompleteDatetime alias: matches autocompleteDatetime (got ${JSON.stringify(blankDefaultsAlias)})`);
+
+const nowAutocompleteValue = autocompleteDatetime('Now', issueReferenceDate, true, {
+  limit: 50,
+  includeValue: true
+}).find(r => r.input === 'Now')?.value;
+const nowResolvedString = resolveDatetimeString('Now', issueReferenceDate, true);
+assert(JSON.stringify(nowResolvedString) === JSON.stringify(nowAutocompleteValue),
+  `Datetime regression resolveDatetimeString: matches autocomplete value for "Now" (got ${JSON.stringify(nowResolvedString)})`);
+const ordinalAutocompleteValue = autocompleteDatetime('March 5th 2028', issueReferenceDate, false, {
+  limit: 50,
+  includeValue: true
+})[0]?.value;
+const ordinalResolvedString = resolveDatetimeString('March 5th 2028', issueReferenceDate, false);
+assert(JSON.stringify(ordinalResolvedString) === JSON.stringify(ordinalAutocompleteValue),
+  `Datetime regression resolveDatetimeString canonicalized input: matches top autocomplete value (got ${JSON.stringify(ordinalResolvedString)})`);
+assert(resolveDatetimeString('tonight at 9 am', issueReferenceDate, false) == null,
+  'Datetime regression resolveDatetimeString invalid phrase: returns null');
+
+const scheduleAutocompleteValue = autocompleteSchedule('every day at 9am', {
+  limit: 50,
+  includeValue: true,
+  referenceDate: issueReferenceDate
+}).find(r => r.input.toLowerCase() === 'every day at 9am')?.value;
+const scheduleResolvedString = resolveScheduleString('every day at 9am', {
+  referenceDate: issueReferenceDate
+});
+assert(JSON.stringify(scheduleResolvedString) === JSON.stringify(scheduleAutocompleteValue),
+  `Schedule regression resolveScheduleString: matches autocomplete value (got ${JSON.stringify(scheduleResolvedString)})`);
+assert(resolveScheduleString('now', { referenceDate: issueReferenceDate }) == null,
+  'Schedule regression resolveScheduleString invalid schedule phrase: returns null');
+
+const combinedNowAutocompleteValue = autocomplete('Now', issueReferenceDate, true, {
+  limit: 50,
+  includeValue: true
+}).find(r => r.input === 'Now')?.value;
+const combinedNowResolved = resolveString('Now', issueReferenceDate, true);
+assert(JSON.stringify(combinedNowResolved) === JSON.stringify(combinedNowAutocompleteValue),
+  `Combined regression resolveString datetime: matches autocomplete value (got ${JSON.stringify(combinedNowResolved)})`);
+
+const combinedScheduleAutocompleteValue = autocomplete('every day at 9am', {
+  limit: 50,
+  includeValue: true,
+  referenceDate: issueReferenceDate
+}).find(r => r.type === 'schedule' && r.input.toLowerCase() === 'every day at 9am')?.value;
+const combinedScheduleResolved = resolveString('every day at 9am', { referenceDate: issueReferenceDate });
+assert(JSON.stringify(combinedScheduleResolved) === JSON.stringify(combinedScheduleAutocompleteValue),
+  `Combined regression resolveString schedule: matches autocomplete value (got ${JSON.stringify(combinedScheduleResolved)})`);
+
+assertResolvedLocal('christmas', '2026-12-25T13:37:00');
+assertResolvedLocal('next month', '2026-04-15T13:37:00');
+assertResolvedLocal('next year', '2027-03-15T13:37:00');
+assertResolvedLocal('in 2 days', '2026-03-17T13:37:00');
+assertResolvedLocal('2 weeks from now', '2026-03-29T13:37:00');
 
 // ---- Summary ----
 console.log('=== Summary ===\n');

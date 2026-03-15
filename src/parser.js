@@ -40,6 +40,7 @@ function parseNaturalSchedule(input, options = {}) {
 function parseStart(context) {
     const { tokens, referenceDate } = context;
     const text = tokens.join(' ');
+    const hasRecurrence = isRecurringSchedule(tokens);
 
     // Check for "now" or "right now"
     if (/\bnow\b/.test(text)) {
@@ -49,7 +50,6 @@ function parseStart(context) {
 
     // Look for explicit dates like "February 1st, 2026 at 9:00 AM"
     // Skip for recurring schedules where month+day is part of the recurrence spec, not a start date
-    const hasRecurrence = /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
     if (!hasRecurrence) {
         const dateMatch = findDateTimePattern(tokens);
         if (dateMatch) {
@@ -91,9 +91,7 @@ function parseStart(context) {
 
     // Check if there's a repeat - if so, use reference date
     // If no repeat found, this might be an error
-    const hasRepeatKeywords = /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
-
-    if (hasRepeatKeywords) {
+    if (hasRecurrence) {
         // Use reference date as start for repeating schedules
         context.start = new Date(referenceDate);
     } else {
@@ -118,7 +116,7 @@ function parseRepeat(context) {
     // Check for one-time future date patterns that shouldn't repeat
     // e.g., "5 fridays from now", "in 40 days", "30 days from now", "next tuesday"
     // BUT skip this check if an explicit recurrence keyword is present (e.g., "every day starting tomorrow")
-    const hasRecurrenceKeyword = /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
+    const hasRecurrenceKeyword = isRecurringSchedule(tokens);
     if (!hasRecurrenceKeyword) {
         const oneTimeFuturePatterns = [
             /\b\d+\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\s+from\s+now\b/,
@@ -188,7 +186,16 @@ function parseUntil(context) {
 
 function isOneTime(tokens) {
     const text = tokens.join(' ');
+    if (/\bonce\s+(?:per|a)\b/.test(text)) {
+        return false;
+    }
     return /\b(once|one[- ]time)\b/.test(text);
+}
+
+function isRecurringSchedule(tokens) {
+    const text = tokens.join(' ');
+    return Boolean(parseInterval(tokens)) ||
+        /\b(every|daily|weekly|monthly|quarterly|yearly|annually|hourly)\b/.test(text);
 }
 
 function findDateTimePattern(tokens) {

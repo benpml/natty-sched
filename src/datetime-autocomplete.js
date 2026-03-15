@@ -5,7 +5,7 @@
  * - High-coverage natural language date/time parsing (single datetime)
  * - Autocomplete that works well on partial inputs and partial tokens
  * - Suggestions always resolve to a valid datetime (no nonsense phrases)
- * - Default time = 9:00 AM when no time is indicated (EXCEPT relative hour/minute which keeps computed time)
+ * - Default time = the current time-of-day from referenceDate when no time is indicated
  *
  * Key behavior:
  * - Relative minute/hour keeps time-of-day (e.g. "24 hours from now" = now + 24h)
@@ -16,8 +16,10 @@
  * - "on ..." suggestions prefer weekdays and never suggest "on today/yesterday/now"
  *
  * Usage:
- *   getDateTimeSuggestions(input, { limit, minScore, includeValue, referenceDate, defaultTime, wheneverDays })
- *   resolveDateTime(input, { referenceDate, defaultTime, wheneverDays })
+ *   getDatetimeSuggestions(input, { limit, minScore, includeValue, referenceDate, excludePast, defaultTime, wheneverDays })
+ *   getDatetimeSuggestions(input, referenceDate, excludePast, { limit, minScore, includeValue, defaultTime, wheneverDays })
+ *   resolveDatetimeString(input, { referenceDate, excludePast, defaultTime, wheneverDays })
+ *   resolveDateTime(input, { referenceDate, excludePast, defaultTime, wheneverDays })
  */
 
 const WEEKDAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
@@ -70,6 +72,42 @@ const TIME_BUCKETS = {
 };
 
 const TIME_BUCKET_KEYS = ['morning','afternoon','evening','night','early','late'];
+const DEFAULT_TIME_VARIANTS = ['at 9 am','at 12 pm','at 3 pm','at 5 pm'];
+
+const IMPLIED_TIME_RULES = {
+  'tonight': { minHour: 18, bucketKeys: new Set(['night', 'tonight']) },
+  'night': { minHour: 18, bucketKeys: new Set(['night', 'tonight']) },
+  'this morning': { minHour: 5, maxHour: 11, bucketKeys: new Set(['early', 'early morning', 'morning', 'this morning']) },
+  'later today': { minHour: 12, bucketKeys: new Set(['afternoon', 'evening', 'night', 'late', 'later today']) }
+};
+
+const IMPLIED_TIME_VARIANTS = {
+  'tonight': ['at 6 pm', 'at 8 pm', 'at 9 pm', 'at 10 pm'],
+  'night': ['at 6 pm', 'at 8 pm', 'at 9 pm', 'at 10 pm'],
+  'this morning': ['at 6 am', 'at 8 am', 'at 9 am', 'at 11 am'],
+  'later today': ['at 1 pm', 'at 3 pm', 'at 5 pm', 'at 8 pm']
+};
+
+const DEFAULT_BLANK_SEEDS = [
+  'now',
+  'in 1 hour',
+  'tomorrow morning',
+  'monday at 8 am',
+  'in 1 week',
+  '1 month from now',
+  'next year',
+  'tonight',
+  'friday at 5 pm',
+  'christmas'
+];
+
+const DEFAULT_BLANK_FALLBACKS = [
+  'tomorrow at noon',
+  'next month',
+  'next tuesday at 9 am',
+  'thanksgiving',
+  'labor day'
+];
 
 const NORMALIZE_MAP = [
   [/[\u2019\u2018]/g, "'"],
@@ -226,9 +264,17 @@ function resolveHolidayOccurrence(key, referenceDate, mode = 'next_or_this', obs
 }
 
 function cloneDate(d){ return new Date(d.getTime()); }
+function isPlainObject(value){ return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date); }
 function startOfDay(d){ const x=cloneDate(d); x.setHours(0,0,0,0); return x; }
 function setTime(d, t){ const x=cloneDate(d); x.setHours(t.h, t.m, 0, 0); return x; }
-function defaultTime(){ return { h: 9, m: 0 }; }
+function defaultTime(referenceDate){
+  return { h: referenceDate.getHours(), m: referenceDate.getMinutes() };
+}
+
+function isAllowedResolvedDate(datetime, referenceDate, excludePast){
+  if (!excludePast) return true;
+  return datetime.getTime() >= referenceDate.getTime();
+}
 
 function isValidYMD(y, mo, da){
   const d = new Date(y, mo, da);
@@ -303,6 +349,10 @@ function parseCountUnitPhrase(text){
 function bucketMatches(prefix){
   if (!prefix) return [];
   return TIME_BUCKET_KEYS.filter(k => k.startsWith(prefix));
+}
+
+function escapeRegExp(text){
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeInput(raw){
@@ -395,6 +445,9 @@ function parseDateTime(tokens){
 function looksTimeLeading(tokens){
   if (!tokens.length) return false;
   if (tokens[0].type === 'kw' && NAMED_TIMES[tokens[0].text]) return true;
+  if (tokens[0].type === 'kw' && TIME_BUCKETS[tokens[0].text]) return true;
+  if (tokens[0].text === 'in' && tokens[1]?.text === 'the') return true;
+  if (tokens[0] && tokens[1] && TIME_BUCKETS[`${tokens[0].text} ${tokens[1].text}`]) return true;
   if (tokens[0].type === 'kw' && tokens[0].text === 'at' && tokens[1]?.type === 'kw' && NAMED_TIMES[tokens[1].text]) return true;
   if (tokens[0].type === 'kw' && tokens[0].text === 'at') return true;
   if (tokens[0].type === 'number'){
@@ -418,7 +471,9 @@ function parseTimeLeading(tokens){
     if (!tokens[idx]) return { ok:false, incomplete:true, reason:'awaiting_time', expected:[{ kind:'time' }] };
   }
 
-  const timeRes = parseTimeAt(tokens, idx);
+  let timeRes = parseSpecialTimePhrases(tokens, idx);
+  if (!timeRes.ok) timeRes = parseBucketTime(tokens, idx);
+  if (!timeRes.ok) timeRes = parseTimeAt(tokens, idx);
   if (!timeRes.ok) return timeRes.incomplete ? timeRes : { ok:false, incomplete:false };
   idx = timeRes.next;
 
@@ -432,7 +487,7 @@ function parseTimeLeading(tokens){
   const dateRes = parseDatePhrase(dateTokens);
   if (!dateRes.ok) return dateRes;
 
-  return { ok:true, ast:{ type:'datetime', date: dateRes.date, time: timeRes.time } };
+  return finalizeDateTimeAst({ type:'datetime', date: dateRes.date, time: timeRes.time });
 }
 
 function parseDateWithOptionalTime(tokens){
@@ -451,14 +506,14 @@ function parseDateWithOptionalTime(tokens){
     if (special.ok){
       idx = special.next;
       if (idx !== tokens.length) return { ok:false, incomplete:false };
-      return { ok:true, ast:{ type:'datetime', date: dateRes.date, time: special.time } };
+      return finalizeDateTimeAst({ type:'datetime', date: dateRes.date, time: special.time });
     }
 
     const bucket = parseBucketTime(tokens, idx);
     if (bucket.ok){
       idx = bucket.next;
       if (idx !== tokens.length) return { ok:false, incomplete:false };
-      return { ok:true, ast:{ type:'datetime', date: dateRes.date, time: bucket.time } };
+      return finalizeDateTimeAst({ type:'datetime', date: dateRes.date, time: bucket.time });
     }
     if (bucket.incomplete) return bucket;
 
@@ -480,14 +535,52 @@ function parseDateWithOptionalTime(tokens){
     if (timeRes.ok){
       idx = timeRes.next;
       if (idx !== tokens.length) return { ok:false, incomplete:false };
-      return { ok:true, ast:{ type:'datetime', date: dateRes.date, time: timeRes.time } };
+      return finalizeDateTimeAst({ type:'datetime', date: dateRes.date, time: timeRes.time });
     }
     if (timeRes.incomplete) return timeRes;
 
     return { ok:false, incomplete:false };
   }
 
-  return { ok:true, ast:{ type:'datetime', date: dateRes.date } };
+  return finalizeDateTimeAst({ type:'datetime', date: dateRes.date });
+}
+
+function finalizeDateTimeAst(ast){
+  return isCompatibleDateTimeAst(ast) ? { ok:true, ast } : { ok:false, incomplete:false };
+}
+
+function getExplicitTimeRule(dateExpr){
+  const impliedKey = dateExpr?.impliedTime?.key;
+  return impliedKey ? IMPLIED_TIME_RULES[impliedKey] || null : null;
+}
+
+function isCompatibleDateTimeAst(ast){
+  if (!ast || ast.type !== 'datetime') return false;
+
+  const rule = getExplicitTimeRule(ast.date);
+  if (!rule || !ast.time) return true;
+
+  if (ast.time.type === 'bucket'){
+    return rule.bucketKeys ? rule.bucketKeys.has(ast.time.key) : true;
+  }
+
+  if (ast.time.type === 'time'){
+    if (rule.minHour != null && ast.time.h < rule.minHour) return false;
+    if (rule.maxHour != null && ast.time.h > rule.maxHour) return false;
+  }
+
+  return true;
+}
+
+function isCompatibleExplicitTime(dateExpr, timeExpr){
+  if (!timeExpr) return true;
+  return isCompatibleDateTimeAst({ type:'datetime', date: dateExpr, time: timeExpr });
+}
+
+function getTimeVariantsForAst(ast){
+  const impliedKey = ast?.date?.impliedTime?.key;
+  if (impliedKey && IMPLIED_TIME_VARIANTS[impliedKey]) return IMPLIED_TIME_VARIANTS[impliedKey];
+  return DEFAULT_TIME_VARIANTS;
 }
 
 function parseSpecialTimePhrases(tokens, idx){
@@ -503,10 +596,59 @@ function parseSpecialTimePhrases(tokens, idx){
 function parseBucketTime(tokens, idx){
   const t1 = tokens[idx];
   const t2 = tokens[idx+1];
+  const t3 = tokens[idx+2];
 
   const w1 = t1?.text;
   const w2 = t2?.text;
+  const w3 = t3?.text;
   const phrase2 = w1 && w2 ? `${w1} ${w2}` : null;
+
+  if (w1 === 'in' && w2 === 'the'){
+    if (!t3){
+      return {
+        ok:false,
+        incomplete:true,
+        reason:'partial_time_bucket',
+        expected:[{ kind:'time_bucket', options: ['morning', 'afternoon', 'evening'] }]
+      };
+    }
+    if (w3 === 'morning' || w3 === 'afternoon' || w3 === 'evening'){
+      return { ok:true, time:{ type:'bucket', key: w3 }, next: idx+3 };
+    }
+    if (t3.type === 'word'){
+      const matches = ['morning', 'afternoon', 'evening'].filter(bucket => bucket.startsWith(t3.text));
+      if (matches.length){
+        return {
+          ok:false,
+          incomplete:true,
+          reason:'partial_time_bucket',
+          expected:[{ kind:'time_bucket', options: matches }]
+        };
+      }
+    }
+  }
+
+  if (w1 === 'at'){
+    if (!t2){
+      return {
+        ok:false,
+        incomplete:true,
+        reason:'partial_time_bucket',
+        expected:[{ kind:'time_bucket', options: ['night'] }]
+      };
+    }
+    if (w2 === 'night'){
+      return { ok:true, time:{ type:'bucket', key:'night' }, next: idx+2 };
+    }
+    if (t2.type === 'word' && 'night'.startsWith(t2.text)){
+      return {
+        ok:false,
+        incomplete:true,
+        reason:'partial_time_bucket',
+        expected:[{ kind:'time_bucket', options: ['night'] }]
+      };
+    }
+  }
 
   if (phrase2 && TIME_BUCKETS[phrase2]) return { ok:true, time:{ type:'bucket', key: phrase2 }, next: idx+2 };
   if (w1 && TIME_BUCKETS[w1]) return { ok:true, time:{ type:'bucket', key: w1 }, next: idx+1 };
@@ -914,7 +1056,7 @@ function parseBaseRef(tokens, i){
 function resolve(ast, opts){
   const referenceDate = opts?.referenceDate ? new Date(opts.referenceDate) : new Date();
   const cfg = {
-    defaultTime: opts?.defaultTime || defaultTime(),
+    defaultTime: opts?.defaultTime || defaultTime(referenceDate),
     buckets: opts?.buckets || TIME_BUCKETS,
     wheneverDays: Number.isFinite(opts?.wheneverDays) ? opts.wheneverDays : 60,
     observed: Boolean(opts?.observed)
@@ -1056,28 +1198,125 @@ function formatValue(d){
 
 // ---------- Suggestions ----------
 
-function toTitle(text){
-  return text
-    .split(' ')
-    .map(w => (w === 'am' || w === 'pm') ? w.toUpperCase() : (w ? (w[0].toUpperCase()+w.slice(1)) : w))
-    .join(' ');
+const DISPLAY_PHRASES = [
+  ["new year's day", "New Year's Day"],
+  ["new year's eve", "New Year's Eve"],
+  ["valentine's day", "Valentine's Day"],
+  ["mother's day", "Mother's Day"],
+  ["father's day", "Father's Day"],
+  ['martin luther king jr day', 'Martin Luther King Jr Day'],
+  ['martin luther king day', 'Martin Luther King Day'],
+  ['presidents day', 'Presidents Day'],
+  ["washington's birthday", "Washington's Birthday"],
+  ['memorial day', 'Memorial Day'],
+  ['labor day', 'Labor Day'],
+  ['thanksgiving day', 'Thanksgiving Day'],
+  ['thanksgiving', 'Thanksgiving'],
+  ['independence day', 'Independence Day'],
+  ['veterans day', 'Veterans Day'],
+  ['good friday', 'Good Friday'],
+  ['christmas', 'Christmas'],
+  ['kwanzaa', 'Kwanzaa'],
+  ['halloween', 'Halloween'],
+  ['easter', 'Easter'],
+  ['juneteenth', 'Juneteenth'],
+  ['mlk day', 'MLK Day'],
+  ['sunday', 'Sunday'],
+  ['monday', 'Monday'],
+  ['tuesday', 'Tuesday'],
+  ['wednesday', 'Wednesday'],
+  ['thursday', 'Thursday'],
+  ['friday', 'Friday'],
+  ['saturday', 'Saturday'],
+  ['january', 'January'],
+  ['february', 'February'],
+  ['march', 'March'],
+  ['april', 'April'],
+  ['may', 'May'],
+  ['june', 'June'],
+  ['july', 'July'],
+  ['august', 'August'],
+  ['september', 'September'],
+  ['october', 'October'],
+  ['november', 'November'],
+  ['december', 'December']
+].sort((a, b) => b[0].length - a[0].length);
+
+function formatSuggestionText(text){
+  let formatted = String(text || '').trim().toLowerCase();
+  if (!formatted) return formatted;
+
+  formatted = formatted.replace(/\bam\b/g, 'AM').replace(/\bpm\b/g, 'PM');
+
+  for (const [lower, display] of DISPLAY_PHRASES){
+    formatted = formatted.replace(new RegExp(`\\b${escapeRegExp(lower)}\\b`, 'g'), display);
+  }
+
+  return formatted.replace(/^[a-z]/, ch => ch.toUpperCase());
 }
 
 function preserveTypedPrefix(rawInput, normalizedInput, candidateNorm){
   const raw = (rawInput || '').trim();
-  if (!raw) return toTitle(candidateNorm);
+  if (!raw) return formatSuggestionText(candidateNorm);
   if (raw.toLowerCase() === normalizedInput && candidateNorm.startsWith(normalizedInput)){
-    return raw + candidateNorm.slice(normalizedInput.length);
+    return formatSuggestionText(raw + candidateNorm.slice(normalizedInput.length));
   }
-  return toTitle(candidateNorm);
+  return formatSuggestionText(candidateNorm);
+}
+
+function usesPrepositionalBucket(ast, baseText){
+  if (!ast || ast.type !== 'datetime') return false;
+
+  const dateType = ast.date?.type;
+  if (dateType === 'weekday' || dateType === 'today' || dateType === 'tomorrow' ||
+      dateType === 'yesterday' || dateType === 'holiday') {
+    return false;
+  }
+
+  if ((baseText || '').startsWith('on ') && (dateType === 'weekday' || dateType === 'holiday')) {
+    return false;
+  }
+
+  return true;
+}
+
+function bucketSuffix(bucket, prepositional){
+  if (!prepositional) return bucket;
+  if (bucket === 'night') return 'at night';
+  if (bucket === 'morning' || bucket === 'afternoon' || bucket === 'evening') {
+    return `in the ${bucket}`;
+  }
+  return bucket;
+}
+
+function appendBucketPhrase(baseText, bucket, ast, referenceDate){
+  const base = String(baseText || '').trim();
+  if (!base) return bucket;
+
+  let parsedAst = ast || null;
+  if (!parsedAst) {
+    const parsed = parseAndResolve(base, { referenceDate });
+    parsedAst = parsed.ok ? parsed.ast : null;
+  }
+
+  if (parsedAst?.date?.type === 'today' && !parsedAst?.date?.impliedTime) {
+    if (bucket === 'night') return 'tonight';
+    if (bucket === 'morning' || bucket === 'afternoon' || bucket === 'evening') {
+      return `this ${bucket}`;
+    }
+  }
+
+  return `${base} ${bucketSuffix(bucket, usesPrepositionalBucket(parsedAst, base))}`.trim();
 }
 
 function parseAndResolve(normInput, options){
   const toks = tokenize(normInput);
   const pr = parseDateTime(toks);
   if (!pr.ok) return pr;
-  const dt = resolve(pr.ast, options);
+  const referenceDate = options?.referenceDate ? new Date(options.referenceDate) : new Date();
+  const dt = resolve(pr.ast, { ...options, referenceDate });
   if (Number.isNaN(dt.getTime())) return { ok:false, incomplete:false };
+  if (!isAllowedResolvedDate(dt, referenceDate, options?.excludePast)) return { ok:false, incomplete:false };
   return { ok:true, datetime: dt, ast: pr.ast };
 }
 
@@ -1094,7 +1333,7 @@ function allowTimeVariants(ast, normInput){
   return true;
 }
 
-function buildCandidates(normInput, parseResult, rawLower){
+function buildCandidates(normInput, parseResult, rawLower, referenceDate = new Date()){
   const out = new Set();
   const add = s => { if (s && s.trim()) out.add(s.trim()); };
 
@@ -1238,14 +1477,19 @@ function buildCandidates(normInput, parseResult, rawLower){
     if (exp.kind === 'time_bucket'){
       const last = normInput.split(' ').slice(-1)[0];
       const lastIsPartial = /^[a-z]+$/.test(last) && !KEYWORDS.has(last) && !MONTH_LOOKUP[last] && !WEEKDAY_LOOKUP[last];
-      (exp.options || []).forEach(b => add(lastIsPartial ? replaceLastWord(normInput, b) : `${normInput} ${b}`));
+      const baseText = lastIsPartial ? normInput.split(' ').slice(0, -1).join(' ') : normInput;
+      const baseParsed = parseAndResolve(baseText, { referenceDate });
+      (exp.options || []).forEach(b => {
+        if (baseParsed.ok && !isCompatibleExplicitTime(baseParsed.ast.date, { type:'bucket', key:b })) return;
+        add(appendBucketPhrase(baseText, b, baseParsed.ok ? baseParsed.ast : null, referenceDate));
+      });
     }
 
     if (exp.kind === 'time'){
       const partial = normInput.split(' ').slice(-1)[0] || '';
       if ('noon'.startsWith(partial)) add(`${normInput} noon`);
       if ('midnight'.startsWith(partial)) add(`${normInput} midnight`);
-      ['9 am','12 pm','3 pm','5 pm','6 am','8 am','10 am','4 pm'].forEach(t => add(`${normInput} ${t}`));
+      ['9 am','12 pm','3 pm','5 pm','6 am','8 am','9 pm','10 pm','11 am','1 pm','4 pm'].forEach(t => add(`${normInput} ${t}`));
     }
 
     if (exp.kind === 'meridiem'){
@@ -1330,10 +1574,12 @@ function buildCandidates(normInput, parseResult, rawLower){
   }
 
   // Add time variants for date-only phrases
-  const pr2 = parseAndResolve(normInput, { referenceDate: new Date() });
+  const pr2 = parseAndResolve(normInput, { referenceDate });
   if (pr2.ok && allowTimeVariants(pr2.ast, normInput)){
-    ['at 9 am','at 12 pm','at 3 pm','at 5 pm'].forEach(v => add(`${normInput} ${v}`));
-    ['morning','afternoon','evening','night'].forEach(v => add(`${normInput} ${v}`));
+    getTimeVariantsForAst(pr2.ast).forEach(v => add(`${normInput} ${v}`));
+    if (!pr2.ast.date?.impliedTime) {
+      ['morning','afternoon','evening','night'].forEach(v => add(appendBucketPhrase(normInput, v, pr2.ast, referenceDate)));
+    }
     if (userWantsEarlyLate(normInput)){
       ['early','late'].forEach(v => add(`${normInput} ${v}`));
     }
@@ -1434,8 +1680,10 @@ function buildCandidates(normInput, parseResult, rawLower){
         add(kw);
         // Also add with time variants for date keywords
         if (['today','tomorrow','yesterday','tonight'].includes(kw)) {
-          add(`${kw} at 9 am`);
-          add(`${kw} at 3 pm`);
+          const kwParsed = parseAndResolve(kw, { referenceDate });
+          if (kwParsed.ok) {
+            getTimeVariantsForAst(kwParsed.ast).slice(0, 2).forEach(variant => add(`${kw} ${variant}`));
+          }
         }
         if (['this','next','last'].includes(kw)) {
           WEEKDAYS.forEach(d => add(`${kw} ${d}`));
@@ -1498,10 +1746,9 @@ function buildCandidates(normInput, parseResult, rawLower){
       for (const r1 of [...w1Weekdays, ...w1Kws]) {
         // "fri a" → "friday at ..."
         if (w2 && 'at'.startsWith(w2)) {
-          add(`${r1} at 9 am`);
-          add(`${r1} at 12 pm`);
-          add(`${r1} at 3 pm`);
-          add(`${r1} at 5 pm`);
+          const parsedR1 = parseAndResolve(r1, { referenceDate });
+          const variants = parsedR1.ok ? getTimeVariantsForAst(parsedR1.ast) : DEFAULT_TIME_VARIANTS;
+          variants.forEach(variant => add(`${r1} ${variant}`));
         }
         // "tod a" → "today at ..."
         if (r1 === 'today' || r1 === 'tomorrow' || r1 === 'yesterday') {
@@ -1541,6 +1788,25 @@ function buildCandidates(normInput, parseResult, rawLower){
           add(`in ${numVal} ${plural}`);
         }
       }
+    }
+
+    const timeThenDate = rawForPartial.match(/^(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s+([a-z]+)$/);
+    if (timeThenDate) {
+      const hour = timeThenDate[1];
+      const minutes = timeThenDate[2];
+      const partialDate = timeThenDate[3];
+      const timeBase = minutes ? `${hour}:${minutes}` : hour;
+      const dateTargets = [
+        ...WEEKDAYS,
+        'today',
+        'tomorrow',
+        'yesterday'
+      ].filter(target => target.startsWith(partialDate));
+
+      dateTargets.forEach(target => {
+        add(`${timeBase} am ${target}`);
+        add(`${timeBase} pm ${target}`);
+      });
     }
 
     // Three-word partial: "at 4pm to" → "at 4 pm today", "5pm tom" → "5 pm tomorrow"
@@ -1976,15 +2242,74 @@ function semanticPreference(normInput, candidateNorm){
   return 0.01;
 }
 
-function getDateTimeSuggestions(partialInput, options = {}){
+function normalizeDateTimeArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions){
+  if (isPlainObject(referenceDateOrOptions) || referenceDateOrOptions === undefined){
+    return {
+      partialInput,
+      options: isPlainObject(referenceDateOrOptions) ? { ...referenceDateOrOptions } : {}
+    };
+  }
+
+  const options = isPlainObject(maybeOptions) ? { ...maybeOptions } : {};
+
+  if (isPlainObject(excludePastOrOptions)) {
+    Object.assign(options, excludePastOrOptions);
+  } else if (typeof excludePastOrOptions === 'boolean' && options.excludePast === undefined) {
+    options.excludePast = excludePastOrOptions;
+  }
+
+  if (typeof referenceDateOrOptions === 'boolean') {
+    if (options.excludePast === undefined) options.excludePast = referenceDateOrOptions;
+  } else if (options.referenceDate === undefined) {
+    options.referenceDate = referenceDateOrOptions;
+  }
+
+  return { partialInput, options };
+}
+
+function buildDefaultBlankSuggestions(options){
+  const { limit=10, includeValue=true } = options;
+  const referenceDate = options.referenceDate ? new Date(options.referenceDate) : new Date();
+  const out = [];
+  const seen = new Set();
+
+  for (const seed of [...DEFAULT_BLANK_SEEDS, ...DEFAULT_BLANK_FALLBACKS]){
+    const resolved = parseAndResolve(seed, { ...options, referenceDate });
+    if (!resolved.ok) continue;
+
+    const text = formatSuggestionText(seed);
+    const key = normalizeInput(text).norm;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      label: text,
+      input: text,
+      value: includeValue ? { datetime: formatValue(resolved.datetime), timestamp: resolved.datetime.getTime() } : undefined,
+      score: Math.max(0.7, 1 - out.length * 0.02),
+      source: 'datetime'
+    });
+
+    if (out.length >= limit) break;
+  }
+
+  if (includeValue) return out;
+  return out.map(({label,input,score,source})=>({label,input,score,source}));
+}
+
+function buildDateTimeSuggestions(partialInput, options = {}){
   const { limit=10, minScore=0.2, includeValue=true } = options;
   const referenceDate = options.referenceDate ? new Date(options.referenceDate) : new Date();
 
   const { raw, norm } = normalizeInput(partialInput || '');
+  if (!norm) {
+    return buildDefaultBlankSuggestions({ ...options, limit, includeValue, referenceDate });
+  }
+
   const toks = tokenize(norm);
   const pr = parseDateTime(toks);
 
-  const candidates = buildCandidates(norm, pr, (partialInput || '').toLowerCase().trim());
+  const candidates = buildCandidates(norm, pr, (partialInput || '').toLowerCase().trim(), referenceDate);
   const suggestions = [];
 
   for (const c of candidates){
@@ -1998,7 +2323,7 @@ function getDateTimeSuggestions(partialInput, options = {}){
 
     const text = preserveTypedPrefix(raw, norm, c);
     suggestions.push({
-      label: toTitle(text),
+      label: text,
       input: text,
       value: includeValue ? { datetime: formatValue(resolved.datetime), timestamp: resolved.datetime.getTime() } : undefined,
       score: finalScore,
@@ -2022,16 +2347,44 @@ function getDateTimeSuggestions(partialInput, options = {}){
   return out.map(({label,input,score,source})=>({label,input,score,source}));
 }
 
-function resolveDateTime(input, options = {}){
+function getDatetimeSuggestions(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions){
+  const { options } = normalizeDateTimeArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+  return buildDateTimeSuggestions(partialInput, options);
+}
+
+function getDateTimeSuggestions(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions){
+  return getDatetimeSuggestions(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+}
+
+function resolveDatetimeString(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions){
+  const { options } = normalizeDateTimeArgs(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
   const { norm } = normalizeInput(input || '');
-  const res = parseAndResolve(norm, options);
-  return res.ok ? res.datetime : null;
+  if (!norm) return null;
+
+  const suggestions = buildDateTimeSuggestions(input, {
+    ...options,
+    includeValue: true,
+    limit: Number.MAX_SAFE_INTEGER,
+    minScore: 0
+  });
+
+  const exact = suggestions.find(s => normalizeInput(s.input).norm === norm);
+  if (exact) return exact.value;
+  return suggestions[0]?.value || null;
+}
+
+function resolveDateTime(input, options = {}){
+  const resolved = resolveDatetimeString(input, options);
+  if (!resolved) return null;
+  return new Date(resolved.timestamp);
 }
 
 module.exports = {
   normalizeInput,
   tokenize,
+  getDatetimeSuggestions,
   getDateTimeSuggestions,
+  resolveDatetimeString,
   resolveDateTime,
 
   // debug

@@ -1,4 +1,5 @@
-const { parse, getNextScheduledTime, nextRun } = require('./index');
+const { parseNaturalSchedule: parse } = require('./src/parser');
+const { calcNextScheduledTime } = require('./index');
 
 console.log('═══════════════════════════════════════════════════════════');
 console.log('       Schedule Calculator - Test Suite');
@@ -95,22 +96,16 @@ testCases.forEach((test, index) => {
         console.log(JSON.stringify(schedule, null, 2));
 
         // Calculate next run as Date
-        const nextDate = getNextScheduledTime(schedule, { from: test.from });
+        const nextDate = calcNextScheduledTime(schedule, { from: test.from });
         console.log(`\nFrom: ${test.from.toISOString()}`);
         console.log(`Next run (Date): ${nextDate ? nextDate.toISOString() : 'null (ended)'}`);
 
         // Calculate next run as timestamp
-        const nextTimestamp = getNextScheduledTime(schedule, {
+        const nextTimestamp = calcNextScheduledTime(schedule, {
             from: test.from,
             asTimestamp: true
         });
         console.log(`Next run (Unix ms): ${nextTimestamp !== null ? nextTimestamp : 'null (ended)'}`);
-
-        // Test the alias
-        const nextViaAlias = nextRun(schedule, { from: test.from });
-        if (nextViaAlias?.getTime() === nextDate?.getTime()) {
-            console.log('✓ Alias works correctly');
-        }
 
         console.log('\n✅ PASSED');
         passed++;
@@ -131,7 +126,7 @@ console.log('\n🔍 Edge Case Tests:\n');
 console.log('Test: Schedule with "until" date in the past');
 const scheduleWithUntil = parse('Every day at 9am', { referenceDate });
 scheduleWithUntil.until = '2026-01-15T00:00:00'; // Before from date
-const nextAfterUntil = getNextScheduledTime(scheduleWithUntil, {
+const nextAfterUntil = calcNextScheduledTime(scheduleWithUntil, {
     from: new Date('2026-02-01T10:00:00')
 });
 console.log(`Result: ${nextAfterUntil === null ? '✅ null (correctly ended)' : '❌ should be null'}`);
@@ -139,8 +134,8 @@ console.log(`Result: ${nextAfterUntil === null ? '✅ null (correctly ended)' : 
 // Test timestamp output
 console.log('\nTest: Timestamp output');
 const simpleSchedule = parse('Tomorrow at 7am', { referenceDate });
-const asDate = getNextScheduledTime(simpleSchedule, { from: referenceDate });
-const asTimestamp = getNextScheduledTime(simpleSchedule, {
+const asDate = calcNextScheduledTime(simpleSchedule, { from: referenceDate });
+const asTimestamp = calcNextScheduledTime(simpleSchedule, {
     from: referenceDate,
     asTimestamp: true
 });

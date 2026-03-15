@@ -2,19 +2,89 @@
  * Unified autocomplete - single entry point for both schedule and datetime suggestions.
  *
  * Usage:
- *   getSuggestions(input, { allowRecurring: true, allowOneTime: true })  // both types
- *   getSuggestions(input, { mode: 'schedule' })                         // schedule only (backward compat)
- *   getSuggestions(input, { mode: 'datetime' })                         // datetime only (backward compat)
+ *   autocomplete(input, { allowRecurring: true, allowOneTime: true })   // both types
+ *   autocompleteSchedule(input, options)                                // schedule only
+ *   autocompleteDatetime(input, options)                                // datetime only
  */
 
 const { parseNaturalSchedule } = require('./parser');
-const { getAllTemplates, parseTemplate, getTemplatesByCategory, getCategories } = require('./autocomplete-templates');
-const { getDateTimeSuggestions } = require('./datetime-autocomplete');
+const { getAllTemplates, parseTemplate } = require('./autocomplete-templates');
+const { getDatetimeSuggestions } = require('./datetime-autocomplete');
 const { normalizeUnified, normalizeForScheduleMatch } = require('./unified-normalizer');
 const { tokenize } = require('./unified-tokenizer');
 const { scoreCandidate } = require('./unified-scorer');
 const { generateScheduleCandidates, generateInferredRecurrence } = require('./schedule-candidates');
 const { SCHEDULE_KEYWORDS, WEEKDAYS, WEEKDAY_LOOKUP } = require('./shared-constants');
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date);
+}
+
+function normalizeAutocompleteArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  if (isPlainObject(referenceDateOrOptions) || referenceDateOrOptions === undefined) {
+    return {
+      partialInput,
+      options: isPlainObject(referenceDateOrOptions) ? { ...referenceDateOrOptions } : {}
+    };
+  }
+
+  const options = isPlainObject(maybeOptions) ? { ...maybeOptions } : {};
+
+  if (isPlainObject(excludePastOrOptions)) {
+    Object.assign(options, excludePastOrOptions);
+  } else if (typeof excludePastOrOptions === 'boolean' && options.excludePast === undefined) {
+    options.excludePast = excludePastOrOptions;
+  }
+
+  if (typeof referenceDateOrOptions === 'boolean') {
+    if (options.excludePast === undefined) options.excludePast = referenceDateOrOptions;
+  } else if (options.referenceDate === undefined) {
+    options.referenceDate = referenceDateOrOptions;
+  }
+
+  return { partialInput, options };
+}
+
+function toDatetimePopularEntries(results) {
+  return results.map(s => ({
+    ...s,
+    type: 'datetime'
+  }));
+}
+
+function toDatetimeEntries(results) {
+  return results.map(s => ({
+    ...s,
+    type: 'datetime'
+  }));
+}
+
+function finalizeSuggestions(scored, limit) {
+  scored.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+
+  const seenLabels = new Set();
+  const result = [];
+  for (const s of scored) {
+    const key = s.label.toLowerCase();
+    if (!seenLabels.has(key)) {
+      seenLabels.add(key);
+      result.push(s);
+      if (result.length >= limit) break;
+    }
+  }
+
+  return result;
+}
+
+function findResolvedValueFromSuggestions(rawInput, suggestions) {
+  const trimmed = String(rawInput || '').trim();
+  if (!trimmed) return null;
+
+  const inputNorm = normalizeUnified(trimmed).norm;
+  const exact = suggestions.find(s => normalizeUnified(s.input).norm === inputNorm);
+  if (exact) return exact.value;
+  return suggestions[0]?.value || null;
+}
 
 // ------- Input Classification -------
 
@@ -173,6 +243,111 @@ function preserveTypedPrefix(rawInput, normInput, candidateNorm) {
   return toTitle(candidateNorm);
 }
 
+function buildScoredScheduleSuggestions(rawInput, normInput, candidates, options = {}) {
+  const {
+    limit = 10,
+    category = null,
+    minScore = 0.3,
+    includeValue = true
+  } = options;
+
+  const deduped = [];
+  const seen = new Map();
+  for (const c of candidates) {
+    const key = normalizeUnified(c.text).norm;
+    if (!seen.has(key)) {
+      seen.set(key, c);
+      deduped.push(c);
+      continue;
+    }
+
+    const existing = seen.get(key);
+    if ((c.popularity || 0) > (existing.popularity || 0)) {
+      const idx = deduped.indexOf(existing);
+      deduped[idx] = c;
+      seen.set(key, c);
+    }
+  }
+
+  const scored = [];
+  for (const c of deduped) {
+    if (/:\s*$/.test(c.text) || /\bat\s*$/.test(c.text)) continue;
+
+    try {
+      const scheduleJSON = parseNaturalSchedule(c.text);
+      if (!scheduleJSON.repeat) continue;
+
+      const isComplete = Boolean(
+        scheduleJSON.repeat.at ||
+        scheduleJSON.repeat.interval?.unit === 'minute' ||
+        scheduleJSON.repeat.interval?.unit === 'hour'
+      );
+      const hasTime = Boolean(scheduleJSON.repeat.at);
+      const candidateNorm = normalizeUnified(c.text).norm;
+      const score = scoreCandidate(normInput, candidateNorm, {
+        source: c.source,
+        popularity: c.popularity,
+        isComplete,
+        hasTime
+      });
+
+      if (score < minScore) continue;
+
+      const publicSource = c.source === 'template' ? 'template' : 'dynamic';
+      const displayText = adjustToUserFormat(rawInput, toTitle(c.text));
+      const entry = {
+        label: displayText,
+        input: displayText,
+        value: includeValue ? scheduleJSON : undefined,
+        score,
+        source: publicSource,
+        type: 'schedule'
+      };
+      if (category) entry.category = category;
+      scored.push(entry);
+    } catch {
+      continue;
+    }
+  }
+
+  return finalizeSuggestions(scored, limit);
+}
+
+function buildScheduleSuggestions(partialInput, options = {}) {
+  const {
+    limit = 10,
+    category = null,
+    minScore = 0.3,
+    includeValue = true
+  } = options;
+
+  if (!partialInput || !String(partialInput).trim()) {
+    return getPopularSuggestions(limit, includeValue, {
+      ...options,
+      allowRecurring: true,
+      allowOneTime: false,
+      category
+    });
+  }
+
+  const rawInput = String(partialInput).trim();
+  const { norm } = normalizeUnified(rawInput);
+  const tokens = tokenize(norm);
+  const candidates = generateScheduleCandidates(norm, tokens, options).map(c => ({
+    text: c.text,
+    source: c.source,
+    popularity: c.popularity
+  }));
+
+  return buildScoredScheduleSuggestions(rawInput, norm, candidates, {
+    ...options,
+    limit,
+    category,
+    minScore,
+    includeValue
+  });
+}
+
 // ------- Main Entry Point -------
 
 /**
@@ -192,7 +367,8 @@ function preserveTypedPrefix(rawInput, normInput, candidateNorm) {
  * @param {number} options.wheneverDays - Range for "whenever" (default 60)
  * @returns {Array<{label, input, value, score, source, type}>}
  */
-function getSuggestions(partialInput, options = {}) {
+function autocomplete(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  const { options } = normalizeAutocompleteArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
   let {
     limit = 10,
     allowRecurring,
@@ -202,6 +378,7 @@ function getSuggestions(partialInput, options = {}) {
     minScore = 0.3,
     includeValue = true,
     referenceDate,
+    excludePast = false,
     defaultTime,
     wheneverDays
   } = options;
@@ -214,7 +391,15 @@ function getSuggestions(partialInput, options = {}) {
 
   // Handle empty input
   if (!partialInput || !partialInput.trim()) {
-    return getPopularSuggestions(limit, includeValue, { allowRecurring, allowOneTime, category });
+    return getPopularSuggestions(limit, includeValue, {
+      allowRecurring,
+      allowOneTime,
+      category,
+      referenceDate,
+      excludePast,
+      defaultTime,
+      wheneverDays
+    });
   }
 
   const rawInput = partialInput.trim();
@@ -222,155 +407,141 @@ function getSuggestions(partialInput, options = {}) {
   const tokens = tokenize(norm);
   const classification = classifyInput(tokens, norm, { allowRecurring, allowOneTime });
 
-  const allCandidates = []; // {text, source, type, popularity}
+  const scored = [];
 
   // ---- Schedule candidates ----
   if (classification.isSchedule) {
-    const scheduleCands = generateScheduleCandidates(norm, tokens, options);
-    for (const c of scheduleCands) {
-      allCandidates.push({ text: c.text, source: c.source, type: 'schedule', popularity: c.popularity });
+    const scheduleCandidates = generateScheduleCandidates(norm, tokens, options).map(c => ({
+      text: c.text,
+      source: c.source,
+      popularity: c.popularity
+    }));
+
+    if (classification.isDatetime && allowRecurring && classification.ambiguous) {
+      const inferred = generateInferredRecurrence(norm, tokens).map(c => ({
+        text: c.text,
+        source: 'inferred',
+        popularity: c.popularity
+      }));
+      scheduleCandidates.push(...inferred);
     }
+    scored.push(...buildScoredScheduleSuggestions(rawInput, norm, scheduleCandidates, {
+      ...options,
+      limit: limit * 2,
+      category,
+      minScore,
+      includeValue
+    }));
   }
 
   // ---- Datetime candidates ----
   if (classification.isDatetime) {
-    const dtSuggestions = getDateTimeSuggestions(rawInput, {
+    const dtSuggestions = getDatetimeSuggestions(rawInput, {
       limit: limit * 2,
       minScore: 0.1,
       includeValue,
       referenceDate,
+      excludePast,
       defaultTime,
       wheneverDays
     });
     for (const s of dtSuggestions) {
-      allCandidates.push({
-        text: s.input,
-        source: 'datetime',
-        type: 'datetime',
-        popularity: 6,
-        preResolved: s.value,
-        preScored: s.score
-      });
-    }
-  }
-
-  // ---- Inferred recurrence ----
-  if (classification.isDatetime && allowRecurring && classification.ambiguous) {
-    const inferred = generateInferredRecurrence(norm, tokens);
-    for (const c of inferred) {
-      allCandidates.push({ text: c.text, source: 'inferred', type: 'schedule', popularity: c.popularity });
-    }
-  }
-
-  // ---- Deduplicate by normalized text + type ----
-  const seen = new Map();
-  const deduped = [];
-  for (const c of allCandidates) {
-    const key = normalizeUnified(c.text).norm + '||' + c.type;
-    if (!seen.has(key)) {
-      seen.set(key, c);
-      deduped.push(c);
-    } else {
-      const existing = seen.get(key);
-      if (c.popularity > existing.popularity) {
-        const idx = deduped.indexOf(existing);
-        deduped[idx] = c;
-        seen.set(key, c);
-      }
-    }
-  }
-
-  // ---- Validate, score, and format ----
-  const scored = [];
-  for (const c of deduped) {
-    // Skip candidates with trailing incomplete time (e.g., "at 3:" or "at ")
-    if (/:\s*$/.test(c.text) || /\bat\s*$/.test(c.text)) continue;
-
-    if (c.type === 'schedule') {
-      try {
-        const scheduleJSON = parseNaturalSchedule(c.text);
-        // Reject candidates that parse as one-time events (no repeat) - these aren't schedules
-        if (!scheduleJSON.repeat) continue;
-        const isComplete = Boolean(
-          scheduleJSON.repeat.at ||
-          scheduleJSON.repeat.interval?.unit === 'minute' ||
-          scheduleJSON.repeat.interval?.unit === 'hour'
-        );
-        const hasTime = Boolean(scheduleJSON.repeat.at);
-
-        const candidateNorm = normalizeUnified(c.text).norm;
-        const score = scoreCandidate(norm, candidateNorm, {
-          source: c.source,
-          popularity: c.popularity,
-          isComplete,
-          hasTime
-        });
-
-        if (score >= minScore) {
-          const publicSource = c.source === 'template' ? 'template' : 'dynamic';
-          const displayText = adjustToUserFormat(rawInput, toTitle(c.text));
-          const entry = {
-            label: displayText,
-            input: displayText,
-            value: includeValue ? scheduleJSON : undefined,
-            score,
-            source: publicSource,
-            type: 'schedule'
-          };
-          if (category) entry.category = category;
-          scored.push(entry);
-        }
-      } catch (e) {
-        // Candidate doesn't parse as schedule - skip
-        continue;
-      }
-    } else if (c.type === 'datetime') {
-      // Already validated by getDateTimeSuggestions
-      const candidateNorm = normalizeUnified(c.text).norm;
+      const candidateNorm = normalizeUnified(s.input).norm;
       const score = scoreCandidate(norm, candidateNorm, {
         source: 'datetime',
-        popularity: c.popularity,
+        popularity: 6,
         isComplete: true,
         hasTime: true
       });
-      const finalScore = Math.max(score, c.preScored || 0);
-
-      if (finalScore >= minScore) {
-        scored.push({
-          label: c.text,
-          input: c.text,
-          value: includeValue ? c.preResolved : undefined,
-          score: finalScore,
-          source: 'datetime',
-          type: 'datetime'
-        });
-      }
+      const finalScore = Math.max(score, s.score || 0);
+      scored.push({
+        label: s.label,
+        input: s.input,
+        value: includeValue ? s.value : undefined,
+        score: finalScore,
+        source: 'datetime',
+        type: 'datetime'
+      });
     }
   }
 
-  // ---- Sort and limit ----
-  scored.sort((a, b) => b.score - a.score || a.label.localeCompare(b.label));
+  return finalizeSuggestions(scored.filter(s => s.score >= minScore), limit);
+}
 
-  // Deduplicate by display label
-  const seenLabels = new Set();
-  const result = [];
-  for (const s of scored) {
-    const key = s.label.toLowerCase();
-    if (!seenLabels.has(key)) {
-      seenLabels.add(key);
-      result.push(s);
-      if (result.length >= limit) break;
-    }
-  }
+function autocompleteSchedule(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  const { options } = normalizeAutocompleteArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+  return buildScheduleSuggestions(partialInput, options);
+}
 
-  return result;
+function autocompleteDatetime(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  const { options } = normalizeAutocompleteArgs(partialInput, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+  return toDatetimeEntries(getDatetimeSuggestions(partialInput, options));
+}
+
+function resolveScheduleString(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  const { options } = normalizeAutocompleteArgs(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+  const suggestions = buildScheduleSuggestions(input, {
+    ...options,
+    includeValue: true,
+    limit: Number.MAX_SAFE_INTEGER,
+    minScore: 0
+  });
+  return findResolvedValueFromSuggestions(input, suggestions);
+}
+
+function resolveString(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions) {
+  const { options } = normalizeAutocompleteArgs(input, referenceDateOrOptions, excludePastOrOptions, maybeOptions);
+  const suggestions = autocomplete(input, {
+    ...options,
+    includeValue: true,
+    limit: Number.MAX_SAFE_INTEGER,
+    minScore: 0
+  });
+  return findResolvedValueFromSuggestions(input, suggestions);
 }
 
 /**
  * Get popular suggestions for empty input.
  */
 function getPopularSuggestions(limit = 10, includeValue = true, opts = {}) {
-  const { allowRecurring = true, allowOneTime = true, category = null } = opts;
+  const {
+    allowRecurring = true,
+    allowOneTime = true,
+    category = null,
+    referenceDate,
+    excludePast = false,
+    defaultTime,
+    wheneverDays
+  } = opts;
+
+  const datetimeDefaults = allowOneTime && !category
+    ? toDatetimePopularEntries(getDatetimeSuggestions('', {
+      limit,
+      includeValue,
+      referenceDate,
+      excludePast,
+      defaultTime,
+      wheneverDays
+    }))
+    : [];
+
+  // Empty-input default state is datetime-first unless the caller explicitly
+  // requests schedule-only or a schedule category.
+  if (datetimeDefaults.length && (allowOneTime && (!allowRecurring || !category))) {
+    return datetimeDefaults.slice(0, limit);
+  }
+
+  if (!allowRecurring && allowOneTime) {
+    return toDatetimePopularEntries(getDatetimeSuggestions('', {
+      limit,
+      includeValue,
+      referenceDate,
+      excludePast,
+      defaultTime,
+      wheneverDays
+    }));
+  }
+
   const results = [];
 
   if (allowRecurring) {
@@ -394,6 +565,9 @@ function getPopularSuggestions(limit = 10, includeValue = true, opts = {}) {
         source: 'template',
         type: 'schedule'
       });
+      if (category) {
+        results[results.length - 1].category = category;
+      }
     }
   }
 
@@ -401,7 +575,14 @@ function getPopularSuggestions(limit = 10, includeValue = true, opts = {}) {
     const dtSeeds = ['tomorrow', 'next week', 'in 1 hour', 'next monday'];
     const dtSuggestions = [];
     for (const seed of dtSeeds) {
-      const results_ = getDateTimeSuggestions(seed, { limit: 1, includeValue });
+      const results_ = getDatetimeSuggestions(seed, {
+        limit: 1,
+        includeValue,
+        referenceDate,
+        excludePast,
+        defaultTime,
+        wheneverDays
+      });
       dtSuggestions.push(...results_);
     }
     for (const s of dtSuggestions) {
@@ -448,7 +629,11 @@ function getSuggestionsByCategory(category, limit = 20, includeValue = true) {
 }
 
 module.exports = {
-  getSuggestions,
+  autocomplete,
+  autocompleteSchedule,
+  autocompleteDatetime,
+  resolveScheduleString,
+  resolveString,
   getSuggestionsByCategory,
   getPopularSuggestions
 };
